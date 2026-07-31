@@ -146,9 +146,29 @@ class CallListenerProxy implements Call.Listener {
 
     // stop audio & cancel notification
     getMediaPlayerManager().stop();
-    getMediaPlayerManager().play(MediaPlayerManager.SoundTable.DISCONNECT);
-    getAudioSwitchManager().getAudioSwitch().deactivate();
-    getVoiceServiceApi().cancelActiveCallNotification(callRecord);
+    // Close patch: only tear down the shared audio session when no
+    // other call remains active. When the user answers a second call, the first
+    // call is disconnected while the second is still live -- playing the
+    // disconnect tone or deactivating the AudioSwitch here would disrupt the
+    // second call's audio. This (disconnecting) call's record was already
+    // removed above, so the database now reflects only the remaining calls.
+    if (!getCallRecordDatabase().hasActiveCall()) {
+      getMediaPlayerManager().play(MediaPlayerManager.SoundTable.DISCONNECT);
+      getAudioSwitchManager().getAudioSwitch().deactivate();
+      // Close patch: only take down the foreground notification when
+      // no other call remains. removeForegroundNotification() ignores the id and
+      // removes whatever is currently the service's foreground notification --
+      // during "answer & end" the just-answered call has already become that
+      // notification, so removing it here would tear down the surviving call's
+      // notification and drop the service out of foreground while a call is live.
+      getVoiceServiceApi().cancelActiveCallNotification(callRecord);
+    }
+    // Close patch: if a second call is still ringing after this call
+    // ended, re-post its incoming notification. This (a) re-asserts it after the
+    // ended call's foreground teardown and (b) refreshes its label -- with no
+    // call active anymore, answering no longer ends anything, so it shows
+    // "Answer" instead of the stale "End & answer".
+    getVoiceServiceApi().refreshRingingIncomingCallNotifications();
 
     // notify JS layer
     sendJSEvent(
