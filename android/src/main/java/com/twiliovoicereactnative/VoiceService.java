@@ -270,7 +270,11 @@ public class VoiceService extends Service {
 
 
     // play ringer sound
-    VoiceApplicationProxy.getAudioSwitchManager().getAudioSwitch().activate();
+    // Close patch: do NOT activate the AudioSwitch here. Activating
+    // puts the audio system into MODE_IN_COMMUNICATION, which would route the
+    // incoming ring to the earpiece at call volume and defeat playing it as a
+    // real ringtone on the ring stream. The AudioSwitch is activated only once
+    // the call is actually accepted (see acceptCall).
     VoiceApplicationProxy.getMediaPlayerManager().play(MediaPlayerManager.SoundTable.INCOMING);
 
     // Close patch: stop ringing if the call is never resolved.
@@ -314,6 +318,12 @@ public class VoiceService extends Service {
 
     // stop ringer sound
     VoiceApplicationProxy.getMediaPlayerManager().stop();
+
+    // Close patch: activate the AudioSwitch here (rather than at
+    // ring time in incomingCall) so the accepted call gets proper in-call audio
+    // routing/focus. Deferring it lets the incoming ring play as a normal
+    // ringtone on the ring stream beforehand.
+    VoiceApplicationProxy.getAudioSwitchManager().getAudioSwitch().activate();
 
     // accept call
     AcceptOptions acceptOptions = new AcceptOptions.Builder()
