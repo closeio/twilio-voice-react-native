@@ -194,9 +194,21 @@ NSString * const kDefaultCallKitConfigurationName = @"Twilio Voice React Native"
 
 - (void)performAnswerVoiceCallWithUUID:(NSUUID *)uuid
                             completion:(void(^)(BOOL success))completionHandler {
-    NSAssert(self.callInviteMap[uuid.UUIDString], @"No call invite");
-    
+    // Close patch: the CallInvite may already be gone from
+    // callInviteMap (the call was cancelled/ended, or already answered) by the
+    // time CallKit delivers this answer action. The NSAssert above is compiled
+    // out in release builds (NS_BLOCK_ASSERTIONS), so execution used to fall
+    // through to +[TVOAcceptOptions optionsWithCallInvite:] with a nil invite,
+    // which raises NSInvalidArgumentException ("A call invite is required.") and
+    // crashes the app. Bail gracefully instead so answering a since-ended call
+    // is a no-op rather than a fatal crash.
     TVOCallInvite *callInvite = self.callInviteMap[uuid.UUIDString];
+    if (!callInvite) {
+        NSLog(@"performAnswerVoiceCallWithUUID: no call invite for %@ (call already ended?), ignoring", uuid.UUIDString);
+        completionHandler(NO);
+        return;
+    }
+
     TVOAcceptOptions *acceptOptions = [TVOAcceptOptions optionsWithCallInvite:callInvite block:^(TVOAcceptOptionsBuilder *builder) {
         builder.uuid = uuid;
         builder.callMessageDelegate = self;
