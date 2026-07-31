@@ -95,7 +95,7 @@ public class VoiceApplicationProxy {
     }
     callRecordDatabase.clear();
   }
-  static CallRecordDatabase getCallRecordDatabase() {
+  public static CallRecordDatabase getCallRecordDatabase() {
     return VoiceApplicationProxy.instance.callRecordDatabase;
   }
   static PreflightTestRecordDatabase getPreflightTestRecordDatabase() {

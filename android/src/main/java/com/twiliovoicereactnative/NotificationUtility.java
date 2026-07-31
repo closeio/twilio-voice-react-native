@@ -31,7 +31,7 @@ import static com.twiliovoicereactnative.VoiceService.constructMessage;
 
 import com.twiliovoicereactnative.CallRecordDatabase.CallRecord;
 
-class NotificationUtility {
+public class NotificationUtility {
   private static final SecureRandom secureRandom = new SecureRandom();
 
   private static class NotificationResource {

@@ -19,7 +19,7 @@ import com.twilio.voice.CallException;
 import com.twilio.voice.CallInvite;
 import com.twilio.voice.CancelledCallInvite;
 
-class CallRecordDatabase  {
+public class CallRecordDatabase  {
   public static class CallRecord {
     public enum CallInviteState { NONE, ACTIVE, USED }
     public enum Direction { INCOMING, OUTGOING }
