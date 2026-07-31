@@ -4,6 +4,7 @@ import java.security.SecureRandom;
 
 import java.util.Map;
 import java.util.Objects;
+import java.util.regex.Matcher;
 
 import android.annotation.SuppressLint;
 import android.app.Notification;
@@ -75,7 +76,11 @@ public class NotificationUtility {
         if (template != null) {
           final String processedTemplate =
             templateDisplayName(template, this.callRecord.getCustomParameters());
-          if (!processedTemplate.isEmpty()) {
+          // Close patch: only use the processed template if it was
+          // fully resolved. If an unresolved ${...} placeholder remains (e.g. a
+          // group call whose push carries no displayName param), fall through to
+          // the ${from} default instead of showing a literal "${displayName}".
+          if (!processedTemplate.isEmpty() && !processedTemplate.contains("${")) {
             return processedTemplate;
           }
         }
@@ -121,7 +126,9 @@ public class NotificationUtility {
         String paramValue = e.getValue();
         processedTemplate = processedTemplate.replaceAll(
           String.format("\\$\\{%s\\}", paramKey),
-          paramValue);
+          // Close patch: quote the replacement so a `$` or `\` in a
+          // caller/lead name (e.g. "Acme $ Co") doesn't throw in replaceAll.
+          Matcher.quoteReplacement(paramValue));
       }
 
       return processedTemplate;
@@ -144,13 +151,6 @@ public class NotificationUtility {
       .setName(notificationResource.getName())
       .build();
 
-    Intent foregroundIntent = constructMessage(
-      context,
-      Constants.ACTION_FOREGROUND_AND_DEPRIORITIZE_INCOMING_CALL_NOTIFICATION,
-      Objects.requireNonNull(VoiceApplicationProxy.getMainActivityClass()),
-      callRecord.getUuid());
-    PendingIntent piForegroundIntent = constructPendingIntentForActivity(context, foregroundIntent);
-
     Intent rejectIntent = constructMessage(
       context,
       Constants.ACTION_REJECT_CALL,
@@ -165,12 +165,32 @@ public class NotificationUtility {
       callRecord.getUuid());
     PendingIntent piAcceptIntent = constructPendingIntentForActivity(context, acceptIntent);
 
+    // Close patch: route BOTH the full-screen intent (fired when the
+    // device is locked) and the content intent (tapping the notification body
+    // when unlocked / app already open) to the dedicated answer screen
+    // (IncomingCallActivity) instead of the main (inbox) activity. Without this,
+    // tapping the notification while the app is open just opens the inbox with no
+    // way to accept/decline the still-ringing call. CallStyle requires a
+    // full-screen intent, so we keep one -- just point it at the answer screen.
+    Intent fullScreenIntent = new Intent(
+      Constants.ACTION_FOREGROUND_AND_DEPRIORITIZE_INCOMING_CALL_NOTIFICATION);
+    fullScreenIntent.setClassName(
+      context.getPackageName(), context.getPackageName() + ".IncomingCallActivity");
+    fullScreenIntent.putExtra(Constants.MSG_KEY_UUID, callRecord.getUuid());
+    // Close patch: unique data per call so concurrent incoming calls
+    // get distinct PendingIntents. Without this, intents differing only by
+    // extras are filterEqual and FLAG_UPDATE_CURRENT overwrites the earlier
+    // call's UUID -- the answer screen would then act on the wrong call.
+    fullScreenIntent.setData(Uri.parse("twilio-incoming-call://" + callRecord.getUuid()));
+    PendingIntent piFullScreenIntent =
+      constructPendingIntentForActivity(context, fullScreenIntent);
+
     return constructNotificationBuilder(context, channelImportance)
       .setSmallIcon(notificationResource.getSmallIconId())
       .setCategory(Notification.CATEGORY_CALL)
       .setAutoCancel(true)
-      .setContentIntent(piForegroundIntent)
-      .setFullScreenIntent(piForegroundIntent, true)
+      .setContentIntent(piFullScreenIntent)
+      .setFullScreenIntent(piFullScreenIntent, true)
       .addPerson(incomingCaller)
       .setStyle(NotificationCompat.CallStyle.forIncomingCall(
         incomingCaller, piRejectIntent, piAcceptIntent))

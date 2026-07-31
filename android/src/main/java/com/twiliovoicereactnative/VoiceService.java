@@ -146,17 +146,31 @@ public class VoiceService extends Service {
         case ACTION_INCOMING_CALL:
           incomingCall(getCallRecord(Objects.requireNonNull(getMessageUUID(intent))));
           break;
-        case ACTION_ACCEPT_CALL:
+        case ACTION_ACCEPT_CALL: {
+          // Close patch: tolerate a missing record (call already ended).
+          CallRecordDatabase.CallRecord acceptRecord = getCallRecordOrNull(getMessageUUID(intent));
+          if (null == acceptRecord) {
+            logger.warning("acceptCall: no call record found, ignoring");
+            break;
+          }
           try {
-            acceptCall(getCallRecord(Objects.requireNonNull(getMessageUUID(intent))));
+            acceptCall(acceptRecord);
           } catch (SecurityException e) {
             sendPermissionsError();
             logger.warning(e, "Cannot accept call, lacking necessary permissions");
           }
           break;
-        case ACTION_REJECT_CALL:
-          rejectCall(getCallRecord(Objects.requireNonNull(getMessageUUID(intent))));
+        }
+        case ACTION_REJECT_CALL: {
+          // Close patch: tolerate a missing record (call already ended).
+          CallRecordDatabase.CallRecord rejectRecord = getCallRecordOrNull(getMessageUUID(intent));
+          if (null == rejectRecord) {
+            logger.warning("rejectCall: no call record found, ignoring");
+            break;
+          }
+          rejectCall(rejectRecord);
           break;
+        }
         case ACTION_CANCEL_CALL:
           cancelCall(getCallRecord(Objects.requireNonNull(getMessageUUID(intent))));
           break;
@@ -207,6 +221,19 @@ public class VoiceService extends Service {
     intent.setAction(action);
     intent.putExtra(Constants.MSG_KEY_UUID, uuid);
     return intent;
+  }
+  // Close patch: tell the incoming-call answer screen
+  // (IncomingCallActivity) that ringing has ended so it can dismiss itself.
+  // This works even on cold-start, where there is no JS runtime to react to
+  // the CallInvite events.
+  private void broadcastIncomingCallEnded(final CallRecordDatabase.CallRecord callRecord) {
+    if (null == callRecord || null == callRecord.getUuid()) {
+      return;
+    }
+    Intent endedIntent = new Intent(getPackageName() + ".INCOMING_CALL_ENDED");
+    endedIntent.setPackage(getPackageName());
+    endedIntent.putExtra("uuid", callRecord.getUuid().toString());
+    sendBroadcast(endedIntent);
   }
   private void disconnect(final CallRecordDatabase.CallRecord callRecord) {
     logger.debug("disconnect");
@@ -259,6 +286,7 @@ public class VoiceService extends Service {
   private void acceptCall(final CallRecordDatabase.CallRecord callRecord) {
     logger.debug("acceptCall: " + callRecord.getUuid());
     cancelRingTimeout(callRecord);
+    broadcastIncomingCallEnded(callRecord);
 
     // verify that mic permissions have been granted and if not, throw a error
     if (ActivityCompat.checkSelfPermission(VoiceService.this,
@@ -316,6 +344,7 @@ public class VoiceService extends Service {
   private void rejectCall(final CallRecordDatabase.CallRecord callRecord) {
     logger.debug("rejectCall: " + callRecord.getUuid());
     cancelRingTimeout(callRecord);
+    broadcastIncomingCallEnded(callRecord);
 
     // remove call record
     getCallRecordDatabase().remove(callRecord);
@@ -347,6 +376,7 @@ public class VoiceService extends Service {
   private void cancelCall(final CallRecordDatabase.CallRecord callRecord) {
     logger.debug("CancelCall: " + callRecord.getUuid());
     cancelRingTimeout(callRecord);
+    broadcastIncomingCallEnded(callRecord);
 
     // take down notification
     removeNotification(callRecord.getNotificationId());
@@ -444,6 +474,12 @@ public class VoiceService extends Service {
   }
   private static CallRecordDatabase.CallRecord getCallRecord(final UUID uuid) {
     return Objects.requireNonNull(getCallRecordDatabase().get(new CallRecordDatabase.CallRecord(uuid)));
+  }
+  // Close patch: null-safe lookup so accept/reject on an
+  // already-ended call (e.g. the answer screen acting on a cancelled call, or a
+  // double-tap) no-op instead of crashing on requireNonNull.
+  private static CallRecordDatabase.CallRecord getCallRecordOrNull(final UUID uuid) {
+    return (null == uuid) ? null : getCallRecordDatabase().get(new CallRecordDatabase.CallRecord(uuid));
   }
   private static void sendJSEvent(@NonNull String scope, @NonNull WritableMap event) {
     getJSEventEmitter().sendEvent(scope, event);

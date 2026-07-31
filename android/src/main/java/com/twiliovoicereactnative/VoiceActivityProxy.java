@@ -38,11 +38,11 @@ public class VoiceActivityProxy {
     if (!checkPermissions()) {
       requestPermissions();
     }
-    // These flags ensure that the activity can be launched when the screen is locked.
-    Window window = context.getWindow();
-    window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
-      | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-      | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    // Close patch: do NOT unconditionally show the main activity
+    // over the lock screen -- that exposes the full CRM whenever the app is
+    // foregrounded on a locked device. Show-when-locked is instead applied per
+    // call intent in MainActivity, and the incoming-call UI is the dedicated
+    // IncomingCallActivity.
     // handle any incoming intents
     handleIntent(context.getIntent());
   }
