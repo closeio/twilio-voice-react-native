@@ -45,7 +45,9 @@ import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.os.Binder;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.util.Pair;
 
 import androidx.annotation.NonNull;
@@ -58,11 +60,48 @@ import com.twilio.voice.Call;
 import com.twilio.voice.ConnectOptions;
 import com.twilio.voice.Voice;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
 public class VoiceService extends Service {
   private static final SDKLog logger = new SDKLog(VoiceService.class);
+  // Close patch: native safety-net timeout so an unanswered
+  // incoming call stops ringing even if Twilio's "cancel" push never arrives
+  // (network loss / Doze). A JS timer can't do this -- RN timers are suspended
+  // while the app is backgrounded/locked, which is exactly the ring-forever
+  // scenario. Must exceed the longest server ring (~32s for group numbers).
+  private static final long INCOMING_RING_TIMEOUT_MS = 60000L;
+  private final Handler ringTimeoutHandler = new Handler(Looper.getMainLooper());
+  private final Map<UUID, Runnable> ringTimeouts = new HashMap<>();
+  private void scheduleRingTimeout(final CallRecordDatabase.CallRecord callRecord) {
+    final UUID uuid = callRecord.getUuid();
+    if (null == uuid) {
+      return;
+    }
+    final Runnable timeout = () -> {
+      ringTimeouts.remove(uuid);
+      final CallRecordDatabase.CallRecord current =
+        getCallRecordDatabase().get(new CallRecordDatabase.CallRecord(uuid));
+      if (null != current) {
+        logger.warning("Incoming call ring timed out, rejecting");
+        rejectCall(current);
+      }
+    };
+    ringTimeouts.put(uuid, timeout);
+    ringTimeoutHandler.postDelayed(timeout, INCOMING_RING_TIMEOUT_MS);
+  }
+  private void cancelRingTimeout(final CallRecordDatabase.CallRecord callRecord) {
+    final UUID uuid = callRecord.getUuid();
+    if (null == uuid) {
+      return;
+    }
+    final Runnable timeout = ringTimeouts.remove(uuid);
+    if (null != timeout) {
+      ringTimeoutHandler.removeCallbacks(timeout);
+    }
+  }
   public class VoiceServiceAPI extends Binder {
     public Call connect(@NonNull ConnectOptions cxnOptions,
                         @NonNull Call.Listener listener) {
@@ -149,6 +188,17 @@ public class VoiceService extends Service {
   public IBinder onBind(Intent intent) {
     return new VoiceServiceAPI();
   }
+  // Close patch: cancel any pending ring-timeout callbacks when the
+  // service is destroyed. The Runnables are posted to the process-global main
+  // looper and capture this VoiceService instance, so without this they would
+  // stay queued for up to INCOMING_RING_TIMEOUT_MS -- leaking the service and
+  // eventually running rejectCall() against a destroyed context.
+  @Override
+  public void onDestroy() {
+    ringTimeoutHandler.removeCallbacksAndMessages(null);
+    ringTimeouts.clear();
+    super.onDestroy();
+  }
   public static Intent constructMessage(@NonNull Context context,
                                         @NonNull final String action,
                                         @NonNull final Class<?> target,
@@ -196,6 +246,9 @@ public class VoiceService extends Service {
     VoiceApplicationProxy.getAudioSwitchManager().getAudioSwitch().activate();
     VoiceApplicationProxy.getMediaPlayerManager().play(MediaPlayerManager.SoundTable.INCOMING);
 
+    // Close patch: stop ringing if the call is never resolved.
+    scheduleRingTimeout(callRecord);
+
     // trigger JS layer
     sendJSEvent(
       ScopeVoice,
@@ -205,6 +258,7 @@ public class VoiceService extends Service {
   }
   private void acceptCall(final CallRecordDatabase.CallRecord callRecord) {
     logger.debug("acceptCall: " + callRecord.getUuid());
+    cancelRingTimeout(callRecord);
 
     // verify that mic permissions have been granted and if not, throw a error
     if (ActivityCompat.checkSelfPermission(VoiceService.this,
@@ -261,6 +315,7 @@ public class VoiceService extends Service {
   }
   private void rejectCall(final CallRecordDatabase.CallRecord callRecord) {
     logger.debug("rejectCall: " + callRecord.getUuid());
+    cancelRingTimeout(callRecord);
 
     // remove call record
     getCallRecordDatabase().remove(callRecord);
@@ -291,6 +346,7 @@ public class VoiceService extends Service {
   }
   private void cancelCall(final CallRecordDatabase.CallRecord callRecord) {
     logger.debug("CancelCall: " + callRecord.getUuid());
+    cancelRingTimeout(callRecord);
 
     // take down notification
     removeNotification(callRecord.getNotificationId());

@@ -17,7 +17,6 @@ import com.twilio.voice.CancelledCallInvite;
 import com.twilio.voice.MessageListener;
 import com.twilio.voice.Voice;
 
-import java.util.Objects;
 import java.util.UUID;
 
 public class VoiceFirebaseMessagingService extends FirebaseMessagingService {
@@ -39,8 +38,18 @@ public class VoiceFirebaseMessagingService extends FirebaseMessagingService {
                                       @Nullable CallException callException) {
       logger.log(String.format("onCancelledCallInvite %s", cancelledCallInvite.getCallSid()));
 
-      CallRecord callRecord = Objects.requireNonNull(
-        getCallRecordDatabase().remove(new CallRecord(cancelledCallInvite.getCallSid())));
+      // Close patch: the record may already be gone -- the native
+      // ring timeout rejects (and removes) an unanswered call after 60s, which
+      // is exactly the Doze / FCM-throttling window in which a delayed cancel
+      // push arrives afterwards. The upstream Objects.requireNonNull would then
+      // throw an NPE on this Firebase background thread and crash the process,
+      // so bail out gracefully if the call was already resolved.
+      CallRecord callRecord =
+        getCallRecordDatabase().remove(new CallRecord(cancelledCallInvite.getCallSid()));
+      if (null == callRecord) {
+        logger.warning("onCancelledCallInvite: call already resolved, ignoring");
+        return;
+      }
 
       callRecord.setCancelledCallInvite(cancelledCallInvite);
       callRecord.setCallException(callException);
