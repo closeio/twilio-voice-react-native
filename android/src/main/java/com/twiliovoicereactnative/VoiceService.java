@@ -143,49 +143,41 @@ public class VoiceService extends Service {
     // against that case (GH-430).
     if (null != intent) {
       switch (Objects.requireNonNull(intent.getAction())) {
+        // Close patch: route every record-dependent action
+        // through withCallRecord(), which tolerates an already-gone record (see below).
         case ACTION_INCOMING_CALL:
-          incomingCall(getCallRecord(Objects.requireNonNull(getMessageUUID(intent))));
+          withCallRecord(intent, "incomingCall", this::incomingCall);
           break;
-        case ACTION_ACCEPT_CALL: {
-          // Close patch: tolerate a missing record (call already ended).
-          CallRecordDatabase.CallRecord acceptRecord = getCallRecordOrNull(getMessageUUID(intent));
-          if (null == acceptRecord) {
-            logger.warning("acceptCall: no call record found, ignoring");
-            break;
-          }
-          try {
-            acceptCall(acceptRecord);
-          } catch (SecurityException e) {
-            sendPermissionsError();
-            logger.warning(e, "Cannot accept call, lacking necessary permissions");
-          }
+        case ACTION_ACCEPT_CALL:
+          withCallRecord(intent, "acceptCall", record -> {
+            try {
+              acceptCall(record);
+            } catch (SecurityException e) {
+              sendPermissionsError();
+              logger.warning(e, "Cannot accept call, lacking necessary permissions");
+            }
+          });
           break;
-        }
-        case ACTION_REJECT_CALL: {
-          // Close patch: tolerate a missing record (call already ended).
-          CallRecordDatabase.CallRecord rejectRecord = getCallRecordOrNull(getMessageUUID(intent));
-          if (null == rejectRecord) {
-            logger.warning("rejectCall: no call record found, ignoring");
-            break;
-          }
-          rejectCall(rejectRecord);
+        case ACTION_REJECT_CALL:
+          withCallRecord(intent, "rejectCall", this::rejectCall);
           break;
-        }
         case ACTION_CANCEL_CALL:
-          cancelCall(getCallRecord(Objects.requireNonNull(getMessageUUID(intent))));
+          withCallRecord(intent, "cancelCall", this::cancelCall);
           break;
         case ACTION_CALL_DISCONNECT:
-          disconnect(getCallRecord(Objects.requireNonNull(getMessageUUID(intent))));
+          withCallRecord(intent, "disconnect", this::disconnect);
           break;
         case ACTION_RAISE_OUTGOING_CALL_NOTIFICATION:
-          raiseOutgoingCallNotification(getCallRecord(Objects.requireNonNull(getMessageUUID(intent))));
+          withCallRecord(intent, "raiseOutgoingCallNotification",
+            this::raiseOutgoingCallNotification);
           break;
         case ACTION_CANCEL_ACTIVE_CALL_NOTIFICATION:
-          cancelActiveCallNotification(getCallRecord(Objects.requireNonNull(getMessageUUID(intent))));
+          withCallRecord(intent, "cancelActiveCallNotification",
+            this::cancelActiveCallNotification);
           break;
         case ACTION_FOREGROUND_AND_DEPRIORITIZE_INCOMING_CALL_NOTIFICATION:
-          foregroundAndDeprioritizeIncomingCallNotification(
-            getCallRecord(Objects.requireNonNull(getMessageUUID(intent))));
+          withCallRecord(intent, "foregroundAndDeprioritizeIncomingCallNotification",
+            this::foregroundAndDeprioritizeIncomingCallNotification);
           break;
         case ACTION_PUSH_APP_TO_FOREGROUND:
           logger.warning("VoiceService received foreground request, ignoring");
@@ -482,14 +474,25 @@ public class VoiceService extends Service {
   private static UUID getMessageUUID(@NonNull final Intent intent) {
     return (UUID)intent.getSerializableExtra(Constants.MSG_KEY_UUID);
   }
-  private static CallRecordDatabase.CallRecord getCallRecord(final UUID uuid) {
-    return Objects.requireNonNull(getCallRecordDatabase().get(new CallRecordDatabase.CallRecord(uuid)));
-  }
-  // Close patch: null-safe lookup so accept/reject on an
-  // already-ended call (e.g. the answer screen acting on a cancelled call, or a
-  // double-tap) no-op instead of crashing on requireNonNull.
+  // Close patch: getCallRecord() (requireNonNull) removed; all
+  // dispatch now goes through getCallRecordOrNull()/withCallRecord().
   private static CallRecordDatabase.CallRecord getCallRecordOrNull(final UUID uuid) {
     return (null == uuid) ? null : getCallRecordDatabase().get(new CallRecordDatabase.CallRecord(uuid));
+  }
+  // Close patch: run `handler` with the intent's call record,
+  // or skip with a warning if it's already gone. Guards onStartCommand against a
+  // notification action / service restart racing call teardown, which used to
+  // throw NPE out of requireNonNull and crash VoiceService.
+  private void withCallRecord(
+      final Intent intent,
+      final String label,
+      final java.util.function.Consumer<CallRecordDatabase.CallRecord> handler) {
+    final CallRecordDatabase.CallRecord record = getCallRecordOrNull(getMessageUUID(intent));
+    if (null == record) {
+      logger.warning(label + ": no call record found (call already ended?), ignoring");
+      return;
+    }
+    handler.accept(record);
   }
   private static void sendJSEvent(@NonNull String scope, @NonNull WritableMap event) {
     getJSEventEmitter().sendEvent(scope, event);
