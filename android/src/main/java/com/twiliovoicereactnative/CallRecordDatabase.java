@@ -190,25 +190,26 @@ public class CallRecordDatabase  {
   // thread (incoming/onDisconnected) structurally modifies it mid-iteration.
   // These helpers iterate a snapshot, so callers don't each repeat that guard.
   public boolean hasActiveCall() {
-    return hasActiveCallOtherThan(null);
+    return !activeCalls().isEmpty();
   }
   public boolean hasActiveCallOtherThan(final CallRecord exclude) {
     return !activeCallsOtherThan(exclude).isEmpty();
   }
-  // Records with a live (non-disconnected) voice Call, excluding `exclude` (pass
-  // null to include all). A CallInvite still ringing has no voice Call yet, so
-  // it is not "active" here.
-  public List<CallRecord> activeCallsOtherThan(final CallRecord exclude) {
+  // Records with a live (non-disconnected) voice Call. A CallInvite still
+  // ringing has no voice Call yet, so it is not "active" here.
+  public List<CallRecord> activeCalls() {
     final List<CallRecord> active = new ArrayList<>();
     for (final CallRecord record : new ArrayList<>(callRecordList)) {
-      if (null != exclude && exclude.equals(record)) {
-        continue;
-      }
       final Call call = record.getVoiceCall();
       if (null != call && Call.State.DISCONNECTED != call.getState()) {
         active.add(record);
       }
     }
+    return active;
+  }
+  public List<CallRecord> activeCallsOtherThan(final CallRecord exclude) {
+    final List<CallRecord> active = activeCalls();
+    active.removeIf(record -> record.equals(exclude));
     return active;
   }
   private static boolean comparator(@NonNull final CallRecord lhs, @NonNull final CallRecord rhs) {
