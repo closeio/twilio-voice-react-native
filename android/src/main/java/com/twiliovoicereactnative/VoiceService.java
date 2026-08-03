@@ -489,7 +489,7 @@ public class VoiceService extends Service {
       final java.util.function.Consumer<CallRecordDatabase.CallRecord> handler) {
     final CallRecordDatabase.CallRecord record = getCallRecordOrNull(getMessageUUID(intent));
     if (null == record) {
-      logger.warning(label + ": no call record found (call already ended?), ignoring");
+      logger.warning(label + ": no call record found, ignoring");
       return;
     }
     handler.accept(record);
