@@ -4,6 +4,7 @@ import static com.twiliovoicereactnative.CallRecordDatabase.CallRecord.CallInvit
 import static com.twiliovoicereactnative.CallRecordDatabase.CallRecord.CallInviteState.NONE;
 import static com.twiliovoicereactnative.CallRecordDatabase.CallRecord.CallInviteState.USED;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
 import java.util.List;
@@ -38,6 +39,12 @@ public class CallRecordDatabase  {
     private Map<String, String> customParameters = null;
     private String notificationDisplayName = null;
     private Direction direction = Direction.INCOMING;
+    // Close patch: whether this incoming call was first presented as
+    // a lightweight "second call" (quiet, no full-screen ring) because the user
+    // was already on a call. Decided once at arrival and read on every re-post
+    // so an async caller-name refresh can't re-derive it from a since-changed
+    // call list and promote the quiet nudge back into a full-screen ring.
+    private boolean lightweightNotification = false;
     public CallRecord(final UUID uuid) {
       this.uuid = uuid;
     }
@@ -113,6 +120,12 @@ public class CallRecordDatabase  {
       return this.callException;
     }
     public String getCallRecipient() { return this.callRecipient; }
+    public boolean isLightweightNotification() {
+      return this.lightweightNotification;
+    }
+    public void setLightweightNotification(final boolean lightweight) {
+      this.lightweightNotification = lightweight;
+    }
     public void setNotificationId(int notificationId) {
       this.notificationId = notificationId;
     }
@@ -171,6 +184,33 @@ public class CallRecordDatabase  {
   }
   public Collection<CallRecord> getCollection() {
     return callRecordList;
+  }
+  // Close patch: active-call queries. getCollection() exposes the
+  // live Vector, whose iterators are fail-fast and throw CME when a Twilio SDK
+  // thread (incoming/onDisconnected) structurally modifies it mid-iteration.
+  // These helpers iterate a snapshot, so callers don't each repeat that guard.
+  public boolean hasActiveCall() {
+    return !activeCalls().isEmpty();
+  }
+  public boolean hasActiveCallOtherThan(final CallRecord exclude) {
+    return !activeCallsOtherThan(exclude).isEmpty();
+  }
+  // Records with a live (non-disconnected) voice Call. A CallInvite still
+  // ringing has no voice Call yet, so it is not "active" here.
+  public List<CallRecord> activeCalls() {
+    final List<CallRecord> active = new ArrayList<>();
+    for (final CallRecord record : new ArrayList<>(callRecordList)) {
+      final Call call = record.getVoiceCall();
+      if (null != call && Call.State.DISCONNECTED != call.getState()) {
+        active.add(record);
+      }
+    }
+    return active;
+  }
+  public List<CallRecord> activeCallsOtherThan(final CallRecord exclude) {
+    final List<CallRecord> active = activeCalls();
+    active.removeIf(record -> record.equals(exclude));
+    return active;
   }
   private static boolean comparator(@NonNull final CallRecord lhs, @NonNull final CallRecord rhs) {
     if (null != lhs.uuid && null != rhs.uuid) {

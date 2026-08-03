@@ -129,6 +129,9 @@ public class VoiceService extends Service {
     public void cancelActiveCallNotification(final CallRecordDatabase.CallRecord callRecord) {
       VoiceService.this.cancelActiveCallNotification(callRecord);
     }
+    public void refreshRingingIncomingCallNotifications() {
+      VoiceService.this.refreshRingingIncomingCallNotifications();
+    }
     public void foregroundAndDeprioritizeIncomingCallNotification(final CallRecordDatabase.CallRecord callRecord) {
       VoiceService.this.foregroundAndDeprioritizeIncomingCallNotification(callRecord);
     }
@@ -251,23 +254,50 @@ public class VoiceService extends Service {
       return;
     }
 
+    // Close patch: if the user is already on an active call, treat
+    // this as a "second call" -- show a quiet, lightweight notification and give
+    // a single vibration nudge instead of the full looping ring + full-screen
+    // takeover, so it doesn't interrupt the call in progress. Applies to all
+    // second calls (personal or group).
+    //
+    // Decide this ONCE, now, and store it on the record. Later re-posts (a
+    // caller-name refresh from JS, or refreshRingingIncomingCallNotifications
+    // when the first call ends) read the stored flag instead of re-deriving it
+    // from the live call list -- otherwise a first call ending mid-refresh would
+    // flip this to false and promote the quiet nudge back into a full-screen ring.
+    final boolean secondCallWhileBusy = getCallRecordDatabase().hasActiveCall();
+    callRecord.setLightweightNotification(secondCallWhileBusy);
+
     // put up notification
     callRecord.setNotificationId(NotificationUtility.createNotificationIdentifier());
     Notification notification = NotificationUtility.createIncomingCallNotification(
       VoiceService.this,
       callRecord,
-      VOICE_CHANNEL_HIGH_IMPORTANCE);
+      secondCallWhileBusy ? VOICE_CHANNEL_DEFAULT_IMPORTANCE : VOICE_CHANNEL_HIGH_IMPORTANCE,
+      secondCallWhileBusy);
     createOrReplaceNotification(callRecord.getNotificationId(), notification);
 
-
-
-    // play ringer sound
-    // Close patch: do NOT activate the AudioSwitch here. Activating
-    // puts the audio system into MODE_IN_COMMUNICATION, which would route the
-    // incoming ring to the earpiece at call volume and defeat playing it as a
-    // real ringtone on the ring stream. The AudioSwitch is activated only once
-    // the call is actually accepted (see acceptCall).
-    VoiceApplicationProxy.getMediaPlayerManager().play(MediaPlayerManager.SoundTable.INCOMING);
+    if (secondCallWhileBusy) {
+      // second call: a continuous (gentler) vibration nudge, no ring sound, no
+      // screen takeover. Cancelled when the call is resolved (stop()).
+      //
+      // If the FIRST (active) call ends while this second call is still ringing,
+      // CallListenerProxy.onDisconnected -> refreshRingingIncomingCallNotifications()
+      // re-posts this notification (surviving the ended call's foreground
+      // teardown), relabels it "Answer" (nothing left to end), and resumes the
+      // vibration. Not yet done: upgrading a now-alone second call to a full
+      // ring (sound + full-screen) -- deferred to the hold/switch follow-up.
+      logger.debug("incomingCall: already on an active call, vibrating for second call");
+      VoiceApplicationProxy.getMediaPlayerManager().startSecondCallVibration();
+    } else {
+      // play ringer sound
+      // Close patch: do NOT activate the AudioSwitch here. Activating
+      // puts the audio system into MODE_IN_COMMUNICATION, which would route the
+      // incoming ring to the earpiece at call volume and defeat playing it as a
+      // real ringtone on the ring stream. The AudioSwitch is activated only once
+      // the call is actually accepted (see acceptCall).
+      VoiceApplicationProxy.getMediaPlayerManager().play(MediaPlayerManager.SoundTable.INCOMING);
+    }
 
     // Close patch: stop ringing if the call is never resolved.
     scheduleRingTimeout(callRecord);
@@ -281,6 +311,14 @@ public class VoiceService extends Service {
   }
   private void acceptCall(final CallRecordDatabase.CallRecord callRecord) {
     logger.debug("acceptCall: " + callRecord.getUuid());
+    // Close patch: ignore a duplicate accept (e.g. a double-tap on
+    // the lightweight notification's Answer action, which is an Activity
+    // PendingIntent) -- the CallInvite is single-use. Bail if it was already
+    // accepted (voice call set) or the invite is gone.
+    if (null != callRecord.getVoiceCall() || null == callRecord.getCallInvite()) {
+      logger.warning("acceptCall: call already accepted or invite missing, ignoring");
+      return;
+    }
     cancelRingTimeout(callRecord);
     broadcastIncomingCallEnded(callRecord);
 
@@ -329,6 +367,14 @@ public class VoiceService extends Service {
         acceptOptions,
         new CallListenerProxy(callRecord.getUuid(), VoiceService.this)));
     callRecord.setCallInviteUsedState();
+
+    // Close patch: "answer & end" -- now that this call is accepted,
+    // disconnect any OTHER call that was still active (the user answered a second
+    // call while on a first one). The newly accepted call replaces the previous
+    // one; hold/switch between the two is a future enhancement. onDisconnected
+    // skips the shared-audio teardown while this call is still active, so ending
+    // the previous call doesn't kill this call's audio (see CallListenerProxy).
+    endOtherActiveCalls(callRecord);
 
     // handle if event spawned from JS
     if (null != callRecord.getCallAcceptedPromise()) {
@@ -410,10 +456,14 @@ public class VoiceService extends Service {
     logger.debug("foregroundAndDeprioritizeIncomingCallNotification: " + callRecord.getUuid());
 
     // cancel existing notification & put up in call
+    // Close patch: this "deprioritize" path already downgrades to
+    // the default channel and stops the sound, so use the lightweight (no
+    // full-screen intent) variant to avoid re-triggering a takeover.
     Notification notification = NotificationUtility.createIncomingCallNotification(
       VoiceService.this,
       callRecord,
-      VOICE_CHANNEL_DEFAULT_IMPORTANCE);
+      VOICE_CHANNEL_DEFAULT_IMPORTANCE,
+      true);
     createOrReplaceNotification(callRecord.getNotificationId(), notification);
 
     // stop active sound (if any)
@@ -493,6 +543,53 @@ public class VoiceService extends Service {
       return;
     }
     handler.accept(record);
+  }
+  // Close patch: re-post the incoming notification for any call that
+  // is still ringing (has a CallInvite, not yet accepted). Called when another
+  // call ends, so a surviving second call (a) stays visible past the ended
+  // call's foreground-service teardown and (b) drops the "End & answer" label
+  // now that answering no longer ends an active call -- the re-post sees no
+  // active call, so hasActiveCallOtherThan() is false and it renders "Answer".
+  // Kept lightweight (quiet, no full-screen takeover); upgrading a now-alone
+  // second call to a full ring is a deferred enhancement.
+  private void refreshRingingIncomingCallNotifications() {
+    boolean anyStillRinging = false;
+    // Close patch: snapshot -- getCollection() is the live Vector,
+    // which a Twilio SDK thread may structurally modify mid-iteration (CME).
+    for (final CallRecordDatabase.CallRecord record :
+        new java.util.ArrayList<>(getCallRecordDatabase().getCollection())) {
+      if (null == record.getVoiceCall()
+          && null != record.getCallInvite()
+          && CallRecordDatabase.CallRecord.CallInviteState.ACTIVE == record.getCallInviteState()) {
+        logger.debug("refreshRingingIncomingCallNotifications: re-posting " + record.getUuid());
+        Notification notification = NotificationUtility.createIncomingCallNotification(
+          VoiceService.this,
+          record,
+          VOICE_CHANNEL_DEFAULT_IMPORTANCE,
+          true);
+        createOrReplaceNotification(record.getNotificationId(), notification);
+        anyStillRinging = true;
+      }
+    }
+    if (anyStillRinging) {
+      // Close patch: resume the second-call vibration nudge -- the
+      // ended call's teardown (stop()) cancelled it. Same gentle cadence and
+      // stop() lifecycle as when the second call first arrived, so it's still
+      // cancelled when this call is answered/declined/cancelled/times out.
+      VoiceApplicationProxy.getMediaPlayerManager().startSecondCallVibration();
+    }
+  }
+  // Close patch: disconnect every tracked call except `keep` that
+  // still has a live voice Call. activeCallsOtherThan() returns a snapshot list,
+  // so disconnecting (which mutates the database via the async onDisconnected
+  // callback) doesn't modify what we iterate.
+  private void endOtherActiveCalls(final CallRecordDatabase.CallRecord keep) {
+    for (final CallRecordDatabase.CallRecord record :
+        getCallRecordDatabase().activeCallsOtherThan(keep)) {
+      logger.debug("endOtherActiveCalls: ending previously active call " + record.getUuid()
+        + " because a new call was accepted");
+      disconnect(record);
+    }
   }
   private static void sendJSEvent(@NonNull String scope, @NonNull WritableMap event) {
     getJSEventEmitter().sendEvent(scope, event);

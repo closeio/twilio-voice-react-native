@@ -141,7 +141,8 @@ public class NotificationUtility {
 
   public static Notification createIncomingCallNotification(@NonNull Context context,
                                                             @NonNull final CallRecord callRecord,
-                                                            @NonNull final String channelImportance) {
+                                                            @NonNull final String channelImportance,
+                                                            final boolean lightweight) {
     final NotificationResource notificationResource = new NotificationResource(
       context,
       NotificationResource.Type.INCOMING,
@@ -185,16 +186,43 @@ public class NotificationUtility {
     PendingIntent piFullScreenIntent =
       constructPendingIntentForActivity(context, fullScreenIntent);
 
-    return constructNotificationBuilder(context, channelImportance)
+    NotificationCompat.Builder builder = constructNotificationBuilder(context, channelImportance)
       .setSmallIcon(notificationResource.getSmallIconId())
       .setCategory(Notification.CATEGORY_CALL)
       .setAutoCancel(true)
       .setContentIntent(piFullScreenIntent)
-      .setFullScreenIntent(piFullScreenIntent, true)
-      .addPerson(incomingCaller)
-      .setStyle(NotificationCompat.CallStyle.forIncomingCall(
-        incomingCaller, piRejectIntent, piAcceptIntent))
-      .build();
+      .addPerson(incomingCaller);
+    if (lightweight) {
+      // Close patch: a second call arriving while already on a call
+      // is shown as a quiet, lightweight notification (no full-screen takeover).
+      // Android REJECTS a CallStyle notification posted via notify() that has no
+      // full-screen intent and is not foreground-service-backed (throws
+      // IllegalArgumentException), so this path must NOT use CallStyle. Use a
+      // plain notification with caller name + Answer/Decline actions instead;
+      // it stays answerable (tapping the body opens the answer screen).
+      builder.setContentTitle(notificationResource.getName());
+      // Close patch: when there's genuinely another call in progress,
+      // answering this one ends it ("answer & end"). Make that explicit so the
+      // user isn't surprised. Gated on an actual active call so the lightweight
+      // notification's other uses don't show a false warning.
+      // TODO(i18n): these strings are hardcoded English pending localization.
+      if (VoiceApplicationProxy.getCallRecordDatabase().hasActiveCallOtherThan(callRecord)) {
+        builder
+          .setContentText("Answering will end your current call")
+          .addAction(0, "Decline", piRejectIntent)
+          .addAction(0, "End & answer", piAcceptIntent);
+      } else {
+        builder
+          .addAction(0, "Decline", piRejectIntent)
+          .addAction(0, "Answer", piAcceptIntent);
+      }
+    } else {
+      builder
+        .setFullScreenIntent(piFullScreenIntent, true)
+        .setStyle(NotificationCompat.CallStyle.forIncomingCall(
+          incomingCaller, piRejectIntent, piAcceptIntent));
+    }
+    return builder.build();
   }
 
   public static Notification createCallAnsweredNotificationWithLowImportance(@NonNull Context context,

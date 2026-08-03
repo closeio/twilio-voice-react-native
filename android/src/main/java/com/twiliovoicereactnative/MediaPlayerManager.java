@@ -52,6 +52,11 @@ class MediaPlayerManager {
   private Vibrator incomingVibrator;
   // wait 0ms, buzz 1000ms, pause 1000ms -- repeats until cancelled.
   private static final long[] INCOMING_VIBRATION_PATTERN = {0L, 1000L, 1000L};
+  // Close patch: gentler repeating pattern for a second call arriving
+  // while already on a call -- short buzz, long gap (0ms wait, 600ms buzz, 2000ms
+  // pause). Continuous so it isn't missed mid-conversation, but less aggressive
+  // than the full incoming ring above.
+  private static final long[] SECOND_CALL_VIBRATION_PATTERN = {0L, 600L, 2000L};
 
   MediaPlayerManager(Context context) {
     this.context = context.getApplicationContext();
@@ -147,10 +152,26 @@ class MediaPlayerManager {
     }
   }
 
-  // Close patch: start a repeating call-style vibration, unless the
-  // device is in silent/mute mode (the OS suppresses ring vibration there and
-  // the user explicitly asked for silence). Vibrate + normal modes buzz.
+  // Close patch: repeating call-style vibration for a normal incoming
+  // call ring.
   private void startIncomingVibration() {
+    startRepeatingVibration(INCOMING_VIBRATION_PATTERN);
+  }
+
+  // Close patch: continuous (but gentler) vibration for a second
+  // call arriving while already on a call -- noticeable so it isn't missed
+  // mid-conversation, less aggressive than the full incoming ring. Shares the
+  // incomingVibrator/stop() lifecycle, so it's cancelled the moment the second
+  // call is answered/declined/cancelled/times out.
+  public synchronized void startSecondCallVibration() {
+    stopIncomingVibration();
+    startRepeatingVibration(SECOND_CALL_VIBRATION_PATTERN);
+  }
+
+  // Loops `pattern` (repeat index 0) until stopIncomingVibration() cancels it.
+  // Skipped in silent/mute mode. Vibration is unaffected by the active call's
+  // audio mode, so it fires reliably mid-call.
+  private void startRepeatingVibration(final long[] pattern) {
     AudioManager audioManager =
       (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
     if (null != audioManager
@@ -159,13 +180,13 @@ class MediaPlayerManager {
     }
     Vibrator vibrator = resolveVibrator();
     if (null == vibrator || !vibrator.hasVibrator()) {
-      logger.warning("startIncomingVibration: no vibrator available");
+      logger.warning("startRepeatingVibration: no vibrator available");
       return;
     }
     // Close patch: tag the vibration with RINGTONE usage. Without a
     // usage, Android 13+/Samsung does not treat it as a call vibration and
     // cancels the *repeating* waveform after the first cycle, so it buzzes once
-    // instead of ringing continuously. VibrationAttributes (API 33+) or
+    // instead of continuously. VibrationAttributes (API 33+) or
     // AudioAttributes(USAGE_NOTIFICATION_RINGTONE) mark it as a ringtone buzz.
     final AudioAttributes ringtoneAudioAttributes =
       new AudioAttributes.Builder()
@@ -175,22 +196,22 @@ class MediaPlayerManager {
     try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         vibrator.vibrate(
-          VibrationEffect.createWaveform(INCOMING_VIBRATION_PATTERN, 0),
+          VibrationEffect.createWaveform(pattern, 0),
           new VibrationAttributes.Builder()
             .setUsage(VibrationAttributes.USAGE_RINGTONE)
             .build());
       } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         vibrator.vibrate(
-          VibrationEffect.createWaveform(INCOMING_VIBRATION_PATTERN, 0),
+          VibrationEffect.createWaveform(pattern, 0),
           ringtoneAudioAttributes);
       } else {
         // API 24-25: VibrationEffect doesn't exist; use the legacy pattern
         // overload, which still accepts AudioAttributes for the usage hint.
-        vibrator.vibrate(INCOMING_VIBRATION_PATTERN, 0, ringtoneAudioAttributes);
+        vibrator.vibrate(pattern, 0, ringtoneAudioAttributes);
       }
       incomingVibrator = vibrator;
     } catch (Exception e) {
-      logger.warning(e, "Failed to start incoming-call vibration");
+      logger.warning(e, "Failed to start vibration");
       incomingVibrator = null;
     }
   }
