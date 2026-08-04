@@ -246,16 +246,11 @@ public class NotificationUtility {
       .setName(notificationResource.getName())
       .build();
 
-    // Close patch: call-unique data so concurrent calls get distinct
-    // PendingIntents -- see createIncomingCallNotification. Without it the
-    // "End call" action of two live call notifications collides and hangs up
-    // whichever call was rendered last.
     Intent foregroundIntent = constructMessage(
       context,
       Constants.ACTION_PUSH_APP_TO_FOREGROUND,
       Objects.requireNonNull(VoiceApplicationProxy.getMainActivityClass()),
       callRecord.getUuid());
-    foregroundIntent.setData(Uri.parse("twilio-foreground-call://" + callRecord.getUuid()));
     PendingIntent piForegroundIntent = constructPendingIntentForActivity(context, foregroundIntent);
 
     Intent endCallIntent = constructMessage(
@@ -263,6 +258,12 @@ public class NotificationUtility {
       Constants.ACTION_CALL_DISCONNECT,
       VoiceService.class,
       callRecord.getUuid());
+    // Close patch: call-unique data, same rationale as the incoming
+    // notification's accept/reject intents. Two live call notifications only
+    // overlap briefly today -- acceptCall() posts this notification before
+    // endOtherActiveCalls() tears the previous call down -- but in that window
+    // the ended call's "End call" button points at the surviving call. Also
+    // future-proofs the hold/switch work, where both calls stay up for real.
     endCallIntent.setData(Uri.parse("twilio-disconnect-call://" + callRecord.getUuid()));
     PendingIntent piEndCallIntent = constructPendingIntentForService(context, endCallIntent);
 
@@ -289,13 +290,11 @@ public class NotificationUtility {
       .setName(notificationResource.getName())
       .build();
 
-    // Close patch: call-unique data -- see createIncomingCallNotification.
     Intent foregroundIntent = constructMessage(
       context,
       Constants.ACTION_PUSH_APP_TO_FOREGROUND,
       Objects.requireNonNull(VoiceApplicationProxy.getMainActivityClass()),
       callRecord.getUuid());
-    foregroundIntent.setData(Uri.parse("twilio-foreground-call://" + callRecord.getUuid()));
     PendingIntent piForegroundIntent = constructPendingIntentForActivity(context, foregroundIntent);
 
     Intent endCallIntent = constructMessage(
@@ -303,6 +302,12 @@ public class NotificationUtility {
       Constants.ACTION_CALL_DISCONNECT,
       VoiceService.class,
       callRecord.getUuid());
+    // Close patch: call-unique data, same rationale as the incoming
+    // notification's accept/reject intents. Two live call notifications only
+    // overlap briefly today -- acceptCall() posts this notification before
+    // endOtherActiveCalls() tears the previous call down -- but in that window
+    // the ended call's "End call" button points at the surviving call. Also
+    // future-proofs the hold/switch work, where both calls stay up for real.
     endCallIntent.setData(Uri.parse("twilio-disconnect-call://" + callRecord.getUuid()));
     PendingIntent piEndCallIntent = constructPendingIntentForService(context, endCallIntent);
 
