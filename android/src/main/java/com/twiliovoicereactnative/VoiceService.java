@@ -391,6 +391,28 @@ public class VoiceService extends Service {
   }
   private void rejectCall(final CallRecordDatabase.CallRecord callRecord) {
     logger.debug("rejectCall: " + callRecord.getUuid());
+    // Close patch: only a still-ringing invite can be rejected. Mirrors
+    // the guard in acceptCall(). Without it a reject aimed at a call that is no
+    // longer ringing -- already accepted, already rejected, cancelled by the
+    // caller (setCancelledCallInvite nulls the invite), or outgoing (never had
+    // one) -- threw an NPE out of getCallInvite().reject() and crashed
+    // VoiceService. Reachable whenever a stale Decline action is delivered, e.g.
+    // a second-call notification tapped just as the invite resolves.
+    //
+    // Bailing early also protects the ACCEPTED case specifically: the teardown
+    // below (remove the record, deactivate the AudioSwitch) would otherwise rip
+    // the audio out from under a live call and orphan it in JS.
+    if (null == callRecord.getCallInvite()
+        || CallRecordDatabase.CallRecord.CallInviteState.ACTIVE != callRecord.getCallInviteState()) {
+      logger.warning("rejectCall: call is no longer ringing, ignoring");
+      // Settle a JS-initiated reject so the promise can't hang -- callInvite_reject
+      // stores it before dispatching here, and validateCallInviteRecord only
+      // null-checks the invite, so a reject of an already-used invite reaches us.
+      if (null != callRecord.getCallRejectedPromise()) {
+        callRecord.getCallRejectedPromise().reject("Call is no longer ringing");
+      }
+      return;
+    }
     cancelRingTimeout(callRecord);
     broadcastIncomingCallEnded(callRecord);
 
@@ -402,7 +424,14 @@ public class VoiceService extends Service {
 
     // stop ringer sound
     VoiceApplicationProxy.getMediaPlayerManager().stop();
-    VoiceApplicationProxy.getAudioSwitchManager().getAudioSwitch().deactivate();
+    // Close patch: only tear down the shared audio session when no
+    // other call is still live -- same guard as CallListenerProxy.onDisconnected.
+    // Declining a second call while the first is in progress used to deactivate
+    // the AudioSwitch out from under that live call, killing its audio.
+    // The record was removed above, so the database reflects only remaining calls.
+    if (!getCallRecordDatabase().hasActiveCall()) {
+      VoiceApplicationProxy.getAudioSwitchManager().getAudioSwitch().deactivate();
+    }
 
     // reject call
     callRecord.getCallInvite().reject(VoiceService.this);
@@ -431,7 +460,13 @@ public class VoiceService extends Service {
 
     // stop ringer sound
     VoiceApplicationProxy.getMediaPlayerManager().stop();
-    VoiceApplicationProxy.getAudioSwitchManager().getAudioSwitch().deactivate();
+    // Close patch: same guard as rejectCall -- a second call being
+    // cancelled by its caller must not deactivate the audio session of the
+    // first call, which is still in progress. A cancelled invite has no voice
+    // Call, so it never counts toward hasActiveCall() itself.
+    if (!getCallRecordDatabase().hasActiveCall()) {
+      VoiceApplicationProxy.getAudioSwitchManager().getAudioSwitch().deactivate();
+    }
 
     // notify JS layer
     sendJSEvent(
