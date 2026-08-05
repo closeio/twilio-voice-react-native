@@ -167,6 +167,9 @@ public class VoiceService extends Service {
     public void refreshRingingIncomingCallNotifications() {
       VoiceService.this.refreshRingingIncomingCallNotifications();
     }
+    public void syncRinger() {
+      VoiceService.this.syncRinger();
+    }
     public void foregroundAndDeprioritizeIncomingCallNotification(final CallRecordDatabase.CallRecord callRecord) {
       VoiceService.this.foregroundAndDeprioritizeIncomingCallNotification(callRecord);
     }
@@ -589,6 +592,10 @@ public class VoiceService extends Service {
     if (null != callRecord) {
       VoiceApplicationProxy.getMediaPlayerManager().stop();
       removeForegroundNotification();
+      // Close patch: that stop() is global -- it ends this call's
+      // sounds but also any ring belonging to a call that is still ringing. Put
+      // the ringer back where the call state says it should be.
+      syncRinger();
     }
   }
   private void createOrReplaceNotification(final int notificationId,
