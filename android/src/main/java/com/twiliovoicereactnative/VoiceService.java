@@ -406,14 +406,14 @@ public class VoiceService extends Service {
   private void rejectCall(final CallRecordDatabase.CallRecord callRecord) {
     logger.debug("rejectCall: " + callRecord.getUuid());
     // Close patch: only a still-ringing invite can be rejected. Mirrors
-    // the guard in acceptCall(). Without it a reject aimed at a call that is no
-    // longer ringing -- already accepted, already rejected, cancelled by the
-    // caller (setCancelledCallInvite nulls the invite), or outgoing (never had
-    // one) -- threw an NPE out of getCallInvite().reject() and crashed
-    // VoiceService. Reachable whenever a stale Decline action is delivered, e.g.
-    // a second-call notification tapped just as the invite resolves.
+    // the guard in acceptCall(). Without it, a reject aimed at a call that is no
+    // longer ringing dereferenced a null getCallInvite() and threw an NPE out of
+    // VoiceService. In practice that means an invite already accepted or already
+    // rejected (state USED), or an outgoing call's UUID -- a caller-cancelled
+    // invite cannot reach here, because onCancelledCallInvite removes the record
+    // before nulling the invite, so the dispatch finds no record at all.
     //
-    // Bailing early also protects the ACCEPTED case specifically: the teardown
+    // Bailing early also protects the accepted case specifically: the teardown
     // below (remove the record, deactivate the AudioSwitch) would otherwise rip
     // the audio out from under a live call and orphan it in JS.
     if (null == callRecord.getCallInvite()
