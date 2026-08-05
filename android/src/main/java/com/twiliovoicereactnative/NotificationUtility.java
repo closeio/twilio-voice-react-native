@@ -152,20 +152,13 @@ public class NotificationUtility {
       .setName(notificationResource.getName())
       .build();
 
-    // Close patch: give the accept/reject intents call-unique data for
-    // the same reason as the full-screen intent below -- PendingIntent matching
-    // ignores extras, so without this the Answer/Decline PendingIntents of two
-    // concurrent incoming calls are filterEqual and FLAG_UPDATE_CURRENT rewrites
-    // the earlier call's UUID to the later one's. Both notifications would then
-    // act on whichever call was rendered last (and every notification re-post --
-    // a caller-name refresh, refreshRingingIncomingCallNotifications -- shifts it
-    // again), so declining the second call could reject/hang up the first.
+    // constructMessage() keys these by action + uuid, so the Answer/Decline
+    // PendingIntents of two concurrent calls can never collide.
     Intent rejectIntent = constructMessage(
       context,
       Constants.ACTION_REJECT_CALL,
       VoiceService.class,
       callRecord.getUuid());
-    rejectIntent.setData(Uri.parse("twilio-reject-call://" + callRecord.getUuid()));
     PendingIntent piRejectIntent = constructPendingIntentForService(context, rejectIntent);
 
     Intent acceptIntent = constructMessage(
@@ -173,7 +166,6 @@ public class NotificationUtility {
       Constants.ACTION_ACCEPT_CALL,
       Objects.requireNonNull(VoiceApplicationProxy.getMainActivityClass()),
       callRecord.getUuid());
-    acceptIntent.setData(Uri.parse("twilio-accept-call://" + callRecord.getUuid()));
     PendingIntent piAcceptIntent = constructPendingIntentForActivity(context, acceptIntent);
 
     // Close patch: route BOTH the full-screen intent (fired when the
@@ -188,11 +180,13 @@ public class NotificationUtility {
     fullScreenIntent.setClassName(
       context.getPackageName(), context.getPackageName() + ".IncomingCallActivity");
     fullScreenIntent.putExtra(Constants.MSG_KEY_UUID, callRecord.getUuid());
-    // Close patch: unique data per call so concurrent incoming calls
-    // get distinct PendingIntents. Without this, intents differing only by
-    // extras are filterEqual and FLAG_UPDATE_CURRENT overwrites the earlier
-    // call's UUID -- the answer screen would then act on the wrong call.
-    fullScreenIntent.setData(Uri.parse("twilio-incoming-call://" + callRecord.getUuid()));
+    // Close patch: hand-built (the answer screen lives in the host app,
+    // so it is addressed by name rather than by Class), so it has to repeat what
+    // constructMessage() does for every other call intent -- key it by action +
+    // uuid so concurrent calls get distinct PendingIntents. See constructMessage.
+    fullScreenIntent.setData(Uri.parse(
+      "twilio-call://" + Constants.ACTION_FOREGROUND_AND_DEPRIORITIZE_INCOMING_CALL_NOTIFICATION
+        + "/" + callRecord.getUuid()));
     PendingIntent piFullScreenIntent =
       constructPendingIntentForActivity(context, fullScreenIntent);
 
@@ -258,13 +252,6 @@ public class NotificationUtility {
       Constants.ACTION_CALL_DISCONNECT,
       VoiceService.class,
       callRecord.getUuid());
-    // Close patch: call-unique data, same rationale as the incoming
-    // notification's accept/reject intents. Two live call notifications only
-    // overlap briefly today -- acceptCall() posts this notification before
-    // endOtherActiveCalls() tears the previous call down -- but in that window
-    // the ended call's "End call" button points at the surviving call. Also
-    // future-proofs the hold/switch work, where both calls stay up for real.
-    endCallIntent.setData(Uri.parse("twilio-disconnect-call://" + callRecord.getUuid()));
     PendingIntent piEndCallIntent = constructPendingIntentForService(context, endCallIntent);
 
     return constructNotificationBuilder(context, Constants.VOICE_CHANNEL_LOW_IMPORTANCE)
@@ -302,13 +289,6 @@ public class NotificationUtility {
       Constants.ACTION_CALL_DISCONNECT,
       VoiceService.class,
       callRecord.getUuid());
-    // Close patch: call-unique data, same rationale as the incoming
-    // notification's accept/reject intents. Two live call notifications only
-    // overlap briefly today -- acceptCall() posts this notification before
-    // endOtherActiveCalls() tears the previous call down -- but in that window
-    // the ended call's "End call" button points at the surviving call. Also
-    // future-proofs the hold/switch work, where both calls stay up for real.
-    endCallIntent.setData(Uri.parse("twilio-disconnect-call://" + callRecord.getUuid()));
     PendingIntent piEndCallIntent = constructPendingIntentForService(context, endCallIntent);
 
     return constructNotificationBuilder(context, Constants.VOICE_CHANNEL_LOW_IMPORTANCE)

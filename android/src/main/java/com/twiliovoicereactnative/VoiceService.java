@@ -43,6 +43,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
+import android.net.Uri;
 import android.os.Binder;
 import android.os.Build;
 import android.os.Handler;
@@ -215,6 +216,19 @@ public class VoiceService extends Service {
     Intent intent = new Intent(context.getApplicationContext(), target);
     intent.setAction(action);
     intent.putExtra(Constants.MSG_KEY_UUID, uuid);
+    // Close patch: key every call intent by action + uuid. PendingIntent
+    // matching ignores extras, so without this the Answer/Decline/End actions of
+    // two concurrent calls are filterEqual: same action, same target, request
+    // code 0, no data. FLAG_UPDATE_CURRENT then rewrites the earlier call's UUID
+    // to the later one's, so both notifications drive whichever call was rendered
+    // last -- and every re-post (a caller-name refresh,
+    // refreshRingingIncomingCallNotifications) shifts it again. Declining the
+    // second call could reject or hang up the first.
+    //
+    // Done here rather than at each call site so a new notification action cannot
+    // reintroduce the collision by forgetting it. Nothing dispatches on the data;
+    // every consumer reads the UUID extra.
+    intent.setData(Uri.parse("twilio-call://" + action + "/" + uuid));
     return intent;
   }
   // Close patch: tell the incoming-call answer screen
