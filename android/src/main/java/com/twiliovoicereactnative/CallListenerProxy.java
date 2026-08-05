@@ -153,7 +153,13 @@ class CallListenerProxy implements Call.Listener {
     // second call's audio. This (disconnecting) call's record was already
     // removed above, so the database now reflects only the remaining calls.
     if (!getCallRecordDatabase().hasActiveCall()) {
-      getMediaPlayerManager().play(MediaPlayerManager.SoundTable.DISCONNECT);
+      // Close patch: no disconnect tone while another call is still
+      // ringing -- play() stops whatever is playing first, so the tone would cut
+      // the ring off, and a hangup tone over a ringing phone is wrong anyway.
+      // refreshRingingIncomingCallNotifications() below reconciles the ringer.
+      if (!getCallRecordDatabase().hasRingingCall()) {
+        getMediaPlayerManager().play(MediaPlayerManager.SoundTable.DISCONNECT);
+      }
       getAudioSwitchManager().getAudioSwitch().deactivate();
       // Close patch: only take down the foreground notification when
       // no other call remains. removeForegroundNotification() ignores the id and

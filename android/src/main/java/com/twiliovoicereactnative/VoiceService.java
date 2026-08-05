@@ -93,6 +93,40 @@ public class VoiceService extends Service {
     ringTimeouts.put(uuid, timeout);
     ringTimeoutHandler.postDelayed(timeout, INCOMING_RING_TIMEOUT_MS);
   }
+  // Close patch: the incoming ringer is derived from the call
+  // database, never commanded ad hoc. Call this after anything that changes what
+  // is ringing or what is in progress; it is idempotent, so reconciling more
+  // often than necessary is free and a notification re-post never restarts the
+  // ringtone.
+  //
+  // Every site that used to play()/stop() the ring directly got this wrong in
+  // one direction or another: declining or cancelling a second call silenced a
+  // first call that was still ringing, answering one of two ringing calls
+  // silenced the other, and a call ending silenced a surviving second call --
+  // which refreshRingingIncomingCallNotifications() then had to compensate for
+  // by restarting the vibration by hand.
+  //
+  // Scope: the incoming ring only. The outgoing ringback is still driven
+  // imperatively from CallListenerProxy.onRinging/onConnected.
+  private void syncRinger() {
+    final MediaPlayerManager mediaPlayerManager = VoiceApplicationProxy.getMediaPlayerManager();
+    final CallRecordDatabase.CallRecord ringing = getCallRecordDatabase().firstRingingCall();
+    if (null == ringing) {
+      mediaPlayerManager.stopRinging();
+      return;
+    }
+    // A call that arrived as a quiet second call is never promoted to a full
+    // ring (that upgrade is deferred to the hold/switch work), and a full ring is
+    // demoted to the quiet nudge as soon as some call is actually in progress --
+    // e.g. the user answers one of two ringing calls, and the other must not go
+    // on ringing at full volume over the conversation.
+    final boolean quiet =
+      ringing.isLightweightNotification() || getCallRecordDatabase().hasActiveCall();
+    logger.debug("syncRinger: ringing " + ringing.getUuid() + (quiet ? " (quiet)" : " (full)"));
+    mediaPlayerManager.startRinging(
+      ringing.getUuid(),
+      quiet ? MediaPlayerManager.RingMode.NUDGE : MediaPlayerManager.RingMode.FULL);
+  }
   private void cancelRingTimeout(final CallRecordDatabase.CallRecord callRecord) {
     final UUID uuid = callRecord.getUuid();
     if (null == uuid) {
@@ -292,26 +326,19 @@ public class VoiceService extends Service {
     createOrReplaceNotification(callRecord.getNotificationId(), notification);
 
     if (secondCallWhileBusy) {
-      // second call: a continuous (gentler) vibration nudge, no ring sound, no
-      // screen takeover. Cancelled when the call is resolved (stop()).
-      //
-      // If the FIRST (active) call ends while this second call is still ringing,
-      // CallListenerProxy.onDisconnected -> refreshRingingIncomingCallNotifications()
-      // re-posts this notification (surviving the ended call's foreground
-      // teardown), relabels it "Answer" (nothing left to end), and resumes the
-      // vibration. Not yet done: upgrading a now-alone second call to a full
-      // ring (sound + full-screen) -- deferred to the hold/switch follow-up.
       logger.debug("incomingCall: already on an active call, vibrating for second call");
-      VoiceApplicationProxy.getMediaPlayerManager().startSecondCallVibration();
-    } else {
-      // play ringer sound
-      // Close patch: do NOT activate the AudioSwitch here. Activating
-      // puts the audio system into MODE_IN_COMMUNICATION, which would route the
-      // incoming ring to the earpiece at call volume and defeat playing it as a
-      // real ringtone on the ring stream. The AudioSwitch is activated only once
-      // the call is actually accepted (see acceptCall).
-      VoiceApplicationProxy.getMediaPlayerManager().play(MediaPlayerManager.SoundTable.INCOMING);
     }
+    // Close patch: start the ring by reconciling against the call
+    // database (the record is already in it) rather than commanding it here --
+    // a full ring, or the quiet nudge if a call is already in progress. See
+    // syncRinger().
+    //
+    // Note that the AudioSwitch is deliberately NOT activated at ring time.
+    // Activating puts the audio system into MODE_IN_COMMUNICATION, which would
+    // route the ring to the earpiece at call volume and defeat playing it as a
+    // real ringtone on the ring stream. It is activated only once the call is
+    // actually accepted (see acceptCall).
+    syncRinger();
 
     // Close patch: stop ringing if the call is never resolved.
     scheduleRingTimeout(callRecord);
@@ -342,9 +369,16 @@ public class VoiceService extends Service {
       // cancel incoming call notification
       removeNotification(callRecord.getNotificationId());
 
-      // stop ringer sound
-      VoiceApplicationProxy.getMediaPlayerManager().stop();
-      VoiceApplicationProxy.getAudioSwitchManager().getAudioSwitch().deactivate();
+      // Close patch: the invite is still ACTIVE (nothing was accepted),
+      // so silence this call explicitly -- otherwise the next reconcile would
+      // start its ring again. Any other ringing call is left alone.
+      callRecord.setRingSilenced(true);
+      syncRinger();
+      // Close patch: and only tear down the shared audio session if no
+      // other call is live -- same guard as everywhere else.
+      if (!getCallRecordDatabase().hasActiveCall()) {
+        VoiceApplicationProxy.getAudioSwitchManager().getAudioSwitch().deactivate();
+      }
 
       // report an error to JS layer
       sendPermissionsError();
@@ -360,8 +394,15 @@ public class VoiceService extends Service {
       callRecord);
     createOrReplaceForegroundNotification(callRecord.getNotificationId(), notification);
 
-    // stop ringer sound
-    VoiceApplicationProxy.getMediaPlayerManager().stop();
+    // Close patch: end this call's ring before the AudioSwitch is
+    // activated below -- MODE_IN_COMMUNICATION would otherwise reroute a ring
+    // that is still playing. stopRinging() rather than stop() so an outgoing
+    // ringback is untouched, and rather than syncRinger() because the invite is
+    // still ACTIVE for a few more lines: the full reconcile runs once the accept
+    // has gone through, which is also when it can see that a call is now in
+    // progress and demote any other ringing call to the quiet nudge.
+    callRecord.setRingSilenced(true);
+    VoiceApplicationProxy.getMediaPlayerManager().stopRinging();
 
     // Close patch: activate the AudioSwitch here (rather than at
     // ring time in incomingCall) so the accepted call gets proper in-call audio
@@ -381,6 +422,11 @@ public class VoiceService extends Service {
         acceptOptions,
         new CallListenerProxy(callRecord.getUuid(), VoiceService.this)));
     callRecord.setCallInviteUsedState();
+
+    // Close patch: this call is in progress now, so reconcile -- any
+    // other call still ringing drops to the quiet nudge rather than ringing over
+    // the conversation, and stays answerable.
+    syncRinger();
 
     // Close patch: "answer & end" -- now that this call is accepted,
     // disconnect any OTHER call that was still active (the user answered a second
@@ -436,8 +482,12 @@ public class VoiceService extends Service {
     // take down notification
     removeNotification(callRecord.getNotificationId());
 
-    // stop ringer sound
-    VoiceApplicationProxy.getMediaPlayerManager().stop();
+    // Close patch: reconcile rather than stop(). The record was removed
+    // above, so this ends the declined call's ring while leaving -- or resuming
+    // -- the ring of any call that is still ringing. An unconditional stop() used
+    // to silence those too: decline the second of two ringing calls and the first
+    // went quiet on screen until it timed out.
+    syncRinger();
     // Close patch: only tear down the shared audio session when no
     // other call is still live -- same guard as CallListenerProxy.onDisconnected.
     // Declining a second call while the first is in progress used to deactivate
@@ -472,8 +522,12 @@ public class VoiceService extends Service {
     // take down notification
     removeNotification(callRecord.getNotificationId());
 
-    // stop ringer sound
-    VoiceApplicationProxy.getMediaPlayerManager().stop();
+    // Close patch: reconcile rather than stop(), same as rejectCall --
+    // a caller hanging up on a second call must not silence a first call that is
+    // still ringing. This record is already out of the database (removed by
+    // onCancelledCallInvite) and its invite is nulled, so it cannot be the call
+    // syncRinger() picks.
+    syncRinger();
     // Close patch: same guard as rejectCall -- a second call being
     // cancelled by its caller must not deactivate the audio session of the
     // first call, which is still in progress. A cancelled invite has no voice
@@ -515,8 +569,12 @@ public class VoiceService extends Service {
       true);
     createOrReplaceNotification(callRecord.getNotificationId(), notification);
 
-    // stop active sound (if any)
-    VoiceApplicationProxy.getMediaPlayerManager().stop();
+    // Close patch: this path deliberately silences a call that is still
+    // ringing -- the user is now looking at its answer screen. Record that on the
+    // call rather than just stopping the sound, so the next reconcile doesn't
+    // start it up again, and so any other ringing call is left alone.
+    callRecord.setRingSilenced(true);
+    syncRinger();
 
     // notify JS layer
     sendJSEvent(
@@ -599,34 +657,27 @@ public class VoiceService extends Service {
   // call's foreground-service teardown and (b) drops the "End & answer" label
   // now that answering no longer ends an active call -- the re-post sees no
   // active call, so hasActiveCallOtherThan() is false and it renders "Answer".
-  // Kept lightweight (quiet, no full-screen takeover); upgrading a now-alone
-  // second call to a full ring is a deferred enhancement.
+  // The re-posted notification is always the lightweight variant (no full-screen
+  // takeover); giving a now-alone second call the full-screen treatment is a
+  // deferred enhancement. The ring itself is not decided here -- syncRinger()
+  // below owns that, and it does restore a full ring for a call that was only
+  // quiet because another call was in progress.
   private void refreshRingingIncomingCallNotifications() {
-    boolean anyStillRinging = false;
-    // Close patch: snapshot -- getCollection() is the live Vector,
-    // which a Twilio SDK thread may structurally modify mid-iteration (CME).
-    for (final CallRecordDatabase.CallRecord record :
-        new java.util.ArrayList<>(getCallRecordDatabase().getCollection())) {
-      if (null == record.getVoiceCall()
-          && null != record.getCallInvite()
-          && CallRecordDatabase.CallRecord.CallInviteState.ACTIVE == record.getCallInviteState()) {
-        logger.debug("refreshRingingIncomingCallNotifications: re-posting " + record.getUuid());
-        Notification notification = NotificationUtility.createIncomingCallNotification(
-          VoiceService.this,
-          record,
-          VOICE_CHANNEL_DEFAULT_IMPORTANCE,
-          true);
-        createOrReplaceNotification(record.getNotificationId(), notification);
-        anyStillRinging = true;
-      }
+    for (final CallRecordDatabase.CallRecord record : getCallRecordDatabase().pendingInviteCalls()) {
+      logger.debug("refreshRingingIncomingCallNotifications: re-posting " + record.getUuid());
+      Notification notification = NotificationUtility.createIncomingCallNotification(
+        VoiceService.this,
+        record,
+        VOICE_CHANNEL_DEFAULT_IMPORTANCE,
+        true);
+      createOrReplaceNotification(record.getNotificationId(), notification);
     }
-    if (anyStillRinging) {
-      // Close patch: resume the second-call vibration nudge -- the
-      // ended call's teardown (stop()) cancelled it. Same gentle cadence and
-      // stop() lifecycle as when the second call first arrived, so it's still
-      // cancelled when this call is answered/declined/cancelled/times out.
-      VoiceApplicationProxy.getMediaPlayerManager().startSecondCallVibration();
-    }
+    // Close patch: and put the ringer back where the call state says it
+    // should be. The ended call's teardown may have cancelled a surviving call's
+    // ring on the way through; this used to be a hand-rolled
+    // startSecondCallVibration() here, which only covered the one case it was
+    // written for. syncRinger() is a no-op when the ring is already correct.
+    syncRinger();
   }
   // Close patch: disconnect every tracked call except `keep` that
   // still has a live voice Call. activeCallsOtherThan() returns a snapshot list,
