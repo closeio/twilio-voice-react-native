@@ -180,10 +180,10 @@ public class NotificationUtility {
     fullScreenIntent.setClassName(
       context.getPackageName(), context.getPackageName() + ".IncomingCallActivity");
     fullScreenIntent.putExtra(Constants.MSG_KEY_UUID, callRecord.getUuid());
-    // Close patch: hand-built (the answer screen lives in the host app,
-    // so it is addressed by name rather than by Class), so it has to repeat what
-    // constructMessage() does for every other call intent -- key it by action +
-    // uuid so concurrent calls get distinct PendingIntents. See constructMessage.
+    // Close patch: hand-built (the answer screen lives in the host app, so it is
+    // addressed by name, not by Class), so it repeats what constructMessage()
+    // does for every other call intent -- key it by action + uuid so concurrent
+    // calls get distinct PendingIntents. See constructMessage.
     fullScreenIntent.setData(Uri.parse(
       "twilio-call://" + Constants.ACTION_FOREGROUND_AND_DEPRIORITIZE_INCOMING_CALL_NOTIFICATION
         + "/" + callRecord.getUuid()));

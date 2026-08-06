@@ -29,9 +29,8 @@ class MediaPlayerManager {
     DISCONNECT,
     RINGTONE
   }
-  // Close patch: how the incoming ring is currently being presented.
-  // FULL is the ringtone plus call-cadence vibration; NUDGE is the quiet
-  // vibration used for a call arriving while another is in progress.
+  // Close patch: FULL is ringtone + call-cadence vibration; NUDGE is the quiet
+  // vibration for a call arriving while another is in progress.
   public enum RingMode { FULL, NUDGE }
   private final Context context;
   private final SoundPool soundPool;
@@ -51,16 +50,13 @@ class MediaPlayerManager {
   // bundled R.raw.incoming sample played at fixed full volume on the voice-call
   // stream (USAGE_VOICE_COMMUNICATION).
   private MediaPlayer incomingPlayer;
-  // Close patch: the fallback bundled-ring stream, tracked separately
-  // from activeStreams so stopRinging() can end the ring without touching an
-  // unrelated sound (an outgoing ringback, a disconnect tone).
+  // Close patch: the fallback bundled-ring stream, tracked apart from
+  // activeStreams so stopRinging() can end the ring without touching an
+  // outgoing ringback or a disconnect tone.
   private Integer incomingStreamId = null;
-  // Close patch: what the ringer is doing and for which call.
-  // VoiceService.syncRinger() derives the desired state from the call database
-  // and calls startRinging()/stopRinging(); this bookkeeping is what makes those
-  // idempotent, so re-posting a notification (a caller-name refresh,
-  // refreshRingingIncomingCallNotifications) never restarts the ringtone from
-  // the beginning.
+  // Close patch: what the ringer is doing and for which call. This is what
+  // makes startRinging() idempotent, so a notification re-post never restarts
+  // the ringtone from the beginning.
   private RingMode ringMode = null;
   private UUID ringingFor = null;
   // Close patch: drive a continuous, repeating vibration for the
@@ -95,9 +91,9 @@ class MediaPlayerManager {
     soundMap.put(SoundTable.RINGTONE, soundPool.load(context, R.raw.ringtone, 1));
   }
 
-  // Close patch: bring the ringer to `mode` for `uuid`. A no-op when
-  // it is already ringing that way, so the caller can reconcile as often as it
-  // likes -- see VoiceService.syncRinger(), the only intended caller.
+  // Close patch: bring the ringer to `mode` for `uuid`; a no-op when it is
+  // already ringing that way, so VoiceService.syncRinger() (the only intended
+  // caller) can reconcile as often as it likes.
   public synchronized void startRinging(@NonNull final UUID uuid, @NonNull final RingMode mode) {
     if (mode == ringMode && uuid.equals(ringingFor)) {
       return;
@@ -108,15 +104,13 @@ class MediaPlayerManager {
     } else {
       startSecondCallVibration();
     }
-    // Assigned after play(), which calls stop() -> stopRinging() and would
-    // otherwise clear what we just recorded.
+    // After play(), which calls stop() -> stopRinging() and would clear these.
     ringMode = mode;
     ringingFor = uuid;
   }
 
-  // Close patch: end the incoming ring and nothing else. Unlike
-  // stop(), this leaves other playback (an outgoing ringback, a disconnect
-  // tone) alone.
+  // Close patch: end the incoming ring and nothing else -- unlike stop(), an
+  // outgoing ringback or disconnect tone keeps playing.
   public synchronized void stopRinging() {
     stopIncomingVibration();
     if (null != incomingPlayer) {
@@ -210,8 +204,7 @@ class MediaPlayerManager {
     int streamId = soundPool.play(soundMap.get(SoundTable.INCOMING), 1.f, 1.f, 1, -1, 1.f);
     if (streamId != 0) {
       activeStreams.add(streamId);
-      // Close patch: remember it as the ring stream so stopRinging()
-      // can end just this one.
+      // Close patch: remember it so stopRinging() can end just this stream.
       incomingStreamId = streamId;
     }
   }
@@ -301,8 +294,7 @@ class MediaPlayerManager {
   }
 
   public synchronized void stop() {
-    // Close patch: the ring (vibration, ringtone player, fallback
-    // stream) plus every other tracked stream.
+    // Close patch: the ring (vibration, player, fallback stream) plus the rest.
     stopRinging();
     // Close patch: stop *all* tracked streams, not just the last.
     for (Integer streamId : activeStreams) {
