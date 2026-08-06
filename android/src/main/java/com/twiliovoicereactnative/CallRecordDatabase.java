@@ -44,13 +44,21 @@ public class CallRecordDatabase  {
     // was already on a call. Decided once at arrival and read on every re-post
     // so an async caller-name refresh can't re-derive it from a since-changed
     // call list and promote the quiet nudge back into a full-screen ring.
-    private boolean lightweightNotification = false;
+    //
+    // volatile: written on the main thread (incomingCall) and read by
+    // VoiceService.syncRinger() from the Firebase and Twilio SDK threads. Nothing
+    // else establishes a happens-before edge for it -- callRecordList's Vector
+    // monitor covers the list, not the fields of the records in it.
+    private volatile boolean lightweightNotification = false;
     // Close patch: this call's ring has been deliberately silenced --
     // the user opened its answer screen, or answering it failed. The invite can
     // still be ACTIVE (it is genuinely still ringing and can be answered), so
     // this is what stops VoiceService.syncRinger() from starting the sound up
     // again on the next reconcile.
-    private boolean ringSilenced = false;
+    //
+    // volatile for the same reason as above, and it matters more here: a reconcile
+    // that misses this write restarts the ring of a call that was just answered.
+    private volatile boolean ringSilenced = false;
     public CallRecord(final UUID uuid) {
       this.uuid = uuid;
     }

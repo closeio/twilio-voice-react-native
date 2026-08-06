@@ -110,22 +110,37 @@ public class VoiceService extends Service {
   // imperatively from CallListenerProxy.onRinging/onConnected.
   private void syncRinger() {
     final MediaPlayerManager mediaPlayerManager = VoiceApplicationProxy.getMediaPlayerManager();
-    final CallRecordDatabase.CallRecord ringing = getCallRecordDatabase().firstRingingCall();
-    if (null == ringing) {
-      mediaPlayerManager.stopRinging();
-      return;
+    // Close patch: reconciling is read-decide-act, and it runs on at least
+    // three threads: the main thread (onStartCommand), the Firebase thread
+    // (onCancelledCallInvite -> cancelCall) and Twilio SDK callback threads
+    // (CallListenerProxy.onConnected/onDisconnected). startRinging()/stopRinging()
+    // are each synchronized, but without holding that same monitor across the
+    // decision two overlapping reconciles can still commit in the wrong order --
+    // a teardown's "nothing should ring" landing after an arrival's "ring for B"
+    // leaves the new call silent until the ring timeout, which is the very failure
+    // this function exists to prevent.
+    //
+    // Locking on the MediaPlayerManager reuses the monitor those methods already
+    // take (Java monitors are reentrant), and it cannot deadlock: MediaPlayerManager
+    // never calls back into the call database.
+    synchronized (mediaPlayerManager) {
+      final CallRecordDatabase.CallRecord ringing = getCallRecordDatabase().firstRingingCall();
+      if (null == ringing) {
+        mediaPlayerManager.stopRinging();
+        return;
+      }
+      // A call that arrived as a quiet second call is never promoted to a full
+      // ring (that upgrade is deferred to the hold/switch work), and a full ring is
+      // demoted to the quiet nudge as soon as some call is actually in progress --
+      // e.g. the user answers one of two ringing calls, and the other must not go
+      // on ringing at full volume over the conversation.
+      final boolean quiet =
+        ringing.isLightweightNotification() || getCallRecordDatabase().hasActiveCall();
+      logger.debug("syncRinger: ringing " + ringing.getUuid() + (quiet ? " (quiet)" : " (full)"));
+      mediaPlayerManager.startRinging(
+        ringing.getUuid(),
+        quiet ? MediaPlayerManager.RingMode.NUDGE : MediaPlayerManager.RingMode.FULL);
     }
-    // A call that arrived as a quiet second call is never promoted to a full
-    // ring (that upgrade is deferred to the hold/switch work), and a full ring is
-    // demoted to the quiet nudge as soon as some call is actually in progress --
-    // e.g. the user answers one of two ringing calls, and the other must not go
-    // on ringing at full volume over the conversation.
-    final boolean quiet =
-      ringing.isLightweightNotification() || getCallRecordDatabase().hasActiveCall();
-    logger.debug("syncRinger: ringing " + ringing.getUuid() + (quiet ? " (quiet)" : " (full)"));
-    mediaPlayerManager.startRinging(
-      ringing.getUuid(),
-      quiet ? MediaPlayerManager.RingMode.NUDGE : MediaPlayerManager.RingMode.FULL);
   }
   private void cancelRingTimeout(final CallRecordDatabase.CallRecord callRecord) {
     final UUID uuid = callRecord.getUuid();

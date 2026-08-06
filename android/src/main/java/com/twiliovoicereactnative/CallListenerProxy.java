@@ -87,7 +87,14 @@ class CallListenerProxy implements Call.Listener {
     // create notification & sound
     callRecord.setNotificationId(NotificationUtility.createNotificationIdentifier());
     getAudioSwitchManager().getAudioSwitch().activate();
+    // Close patch: play() stops every tracked sound first, so starting this
+    // outgoing ringback cancels the ring of any call that is still ringing -- an
+    // incoming call that arrived during dial-out is already vibrating its quiet
+    // nudge, because the outgoing record holds a live Call from the moment of
+    // connect(). Reconcile straight after, as onConnected does, or that nudge is
+    // gone for good and the call waits out the ring timeout in silence.
     getMediaPlayerManager().play(MediaPlayerManager.SoundTable.RINGTONE);
+    getVoiceServiceApi().syncRinger();
     getVoiceServiceApi().raiseOutgoingCallNotification(callRecord);
 
     // notify JS layer
