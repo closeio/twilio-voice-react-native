@@ -13,10 +13,13 @@ import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.os.VibratorManager;
 
+import androidx.annotation.NonNull;
+
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 class MediaPlayerManager {
   private static final SDKLog logger = new SDKLog(MediaPlayerManager.class);
@@ -26,6 +29,9 @@ class MediaPlayerManager {
     DISCONNECT,
     RINGTONE
   }
+  // Close patch: FULL is ringtone + call-cadence vibration; NUDGE is the quiet
+  // vibration for a call arriving while another is in progress.
+  public enum RingMode { FULL, NUDGE }
   private final Context context;
   private final SoundPool soundPool;
   private final Map<SoundTable, Integer> soundMap;
@@ -44,6 +50,15 @@ class MediaPlayerManager {
   // bundled R.raw.incoming sample played at fixed full volume on the voice-call
   // stream (USAGE_VOICE_COMMUNICATION).
   private MediaPlayer incomingPlayer;
+  // Close patch: the fallback bundled-ring stream, tracked apart from
+  // activeStreams so stopRinging() can end the ring without touching an
+  // outgoing ringback or a disconnect tone.
+  private Integer incomingStreamId = null;
+  // Close patch: what the ringer is doing and for which call. This is what
+  // makes startRinging() idempotent, so a notification re-post never restarts
+  // the ringtone from the beginning.
+  private RingMode ringMode = null;
+  private UUID ringingFor = null;
   // Close patch: drive a continuous, repeating vibration for the
   // duration of an incoming call ring. Android only vibrates a notification
   // once (when it posts), so a proper "ringing" buzz has to be driven manually
@@ -74,6 +89,46 @@ class MediaPlayerManager {
     soundMap.put(SoundTable.OUTGOING, soundPool.load(context, R.raw.outgoing, 1));
     soundMap.put(SoundTable.DISCONNECT, soundPool.load(context, R.raw.disconnect, 1));
     soundMap.put(SoundTable.RINGTONE, soundPool.load(context, R.raw.ringtone, 1));
+  }
+
+  // Close patch: bring the ringer to `mode` for `uuid`; a no-op when it is
+  // already ringing that way, so VoiceService.syncRinger() (the only intended
+  // caller) can reconcile as often as it likes.
+  public synchronized void startRinging(@NonNull final UUID uuid, @NonNull final RingMode mode) {
+    if (mode == ringMode && uuid.equals(ringingFor)) {
+      return;
+    }
+    stopRinging();
+    if (RingMode.FULL == mode) {
+      play(SoundTable.INCOMING);
+    } else {
+      startSecondCallVibration();
+    }
+    // After play(), which calls stop() -> stopRinging() and would clear these.
+    ringMode = mode;
+    ringingFor = uuid;
+  }
+
+  // Close patch: end the incoming ring and nothing else -- unlike stop(), an
+  // outgoing ringback or disconnect tone keeps playing.
+  public synchronized void stopRinging() {
+    stopIncomingVibration();
+    if (null != incomingPlayer) {
+      try {
+        incomingPlayer.stop();
+      } catch (IllegalStateException ignored) {
+        // player was never started / already stopped -- nothing to do
+      }
+      incomingPlayer.release();
+      incomingPlayer = null;
+    }
+    if (null != incomingStreamId) {
+      soundPool.stop(incomingStreamId);
+      activeStreams.remove(incomingStreamId);
+      incomingStreamId = null;
+    }
+    ringMode = null;
+    ringingFor = null;
   }
 
   public synchronized void play(final SoundTable sound) {
@@ -149,6 +204,8 @@ class MediaPlayerManager {
     int streamId = soundPool.play(soundMap.get(SoundTable.INCOMING), 1.f, 1.f, 1, -1, 1.f);
     if (streamId != 0) {
       activeStreams.add(streamId);
+      // Close patch: remember it so stopRinging() can end just this stream.
+      incomingStreamId = streamId;
     }
   }
 
@@ -163,7 +220,7 @@ class MediaPlayerManager {
   // mid-conversation, less aggressive than the full incoming ring. Shares the
   // incomingVibrator/stop() lifecycle, so it's cancelled the moment the second
   // call is answered/declined/cancelled/times out.
-  public synchronized void startSecondCallVibration() {
+  private void startSecondCallVibration() {
     stopIncomingVibration();
     startRepeatingVibration(SECOND_CALL_VIBRATION_PATTERN);
   }
@@ -237,18 +294,8 @@ class MediaPlayerManager {
   }
 
   public synchronized void stop() {
-    // Close patch: stop the incoming-call vibration.
-    stopIncomingVibration();
-    // Close patch: tear down the incoming-ring MediaPlayer too.
-    if (null != incomingPlayer) {
-      try {
-        incomingPlayer.stop();
-      } catch (IllegalStateException ignored) {
-        // player was never started / already stopped -- nothing to do
-      }
-      incomingPlayer.release();
-      incomingPlayer = null;
-    }
+    // Close patch: the ring (vibration, player, fallback stream) plus the rest.
+    stopRinging();
     // Close patch: stop *all* tracked streams, not just the last.
     for (Integer streamId : activeStreams) {
       soundPool.stop(streamId);

@@ -52,14 +52,19 @@ class CallListenerProxy implements Call.Listener {
   public void onConnectFailure(@NonNull Call call, @NonNull CallException callException) {
     debug("onConnectFailure");
 
-    // stop sound and routing
-    getMediaPlayerManager().stop();
-    getAudioSwitchManager().getAudioSwitch().deactivate();
-
     // find call record & remove
     CallRecord callRecord = Objects.requireNonNull(getCallRecordDatabase().remove(new CallRecord(uuid)));
 
-    // take down notification
+    // stop sound and routing
+    // Close patch: below the record removal so the guard sees only the remaining
+    // calls, and gated -- a failed connect must not deactivate the shared audio
+    // session under a still-live call. Same guard as rejectCall/onDisconnected.
+    getMediaPlayerManager().stop();
+    if (!getCallRecordDatabase().hasActiveCall()) {
+      getAudioSwitchManager().getAudioSwitch().deactivate();
+    }
+
+    // take down notification (which reconciles the ringer after its own stop())
     getVoiceServiceApi().cancelActiveCallNotification(callRecord);
 
     // serialize and notify JS
@@ -81,7 +86,12 @@ class CallListenerProxy implements Call.Listener {
     // create notification & sound
     callRecord.setNotificationId(NotificationUtility.createNotificationIdentifier());
     getAudioSwitchManager().getAudioSwitch().activate();
+    // Close patch: play() stops every tracked sound, so this ringback cancels the
+    // nudge of an incoming call that arrived during dial-out (the outgoing record
+    // holds a live Call from connect()). Reconcile after, as onConnected does, or
+    // that call waits out the ring timeout in silence.
     getMediaPlayerManager().play(MediaPlayerManager.SoundTable.RINGTONE);
+    getVoiceServiceApi().syncRinger();
     getVoiceServiceApi().raiseOutgoingCallNotification(callRecord);
 
     // notify JS layer
@@ -99,7 +109,11 @@ class CallListenerProxy implements Call.Listener {
     CallRecord callRecord = Objects.requireNonNull(getCallRecordDatabase().get(new CallRecord(uuid)));
     callRecord.setCall(call);
     callRecord.setTimestamp(new Date());
+    // Close patch: this stop() ends this call's ringback, but it is global --
+    // answer one of two ringing calls and it cancels the ring syncRinger() just
+    // started for the other, a few hundred ms after the accept. Reconcile after.
     getMediaPlayerManager().stop();
+    getVoiceServiceApi().syncRinger();
 
     // notify JS layer
     sendJSEvent(
@@ -153,7 +167,12 @@ class CallListenerProxy implements Call.Listener {
     // second call's audio. This (disconnecting) call's record was already
     // removed above, so the database now reflects only the remaining calls.
     if (!getCallRecordDatabase().hasActiveCall()) {
-      getMediaPlayerManager().play(MediaPlayerManager.SoundTable.DISCONNECT);
+      // Close patch: no disconnect tone while another call is still ringing --
+      // play() stops what is playing first, so the tone would cut the ring off,
+      // and a hangup tone over a ringing phone is wrong anyway.
+      if (!getCallRecordDatabase().hasRingingCall()) {
+        getMediaPlayerManager().play(MediaPlayerManager.SoundTable.DISCONNECT);
+      }
       getAudioSwitchManager().getAudioSwitch().deactivate();
       // Close patch: only take down the foreground notification when
       // no other call remains. removeForegroundNotification() ignores the id and

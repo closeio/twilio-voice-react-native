@@ -44,7 +44,19 @@ public class CallRecordDatabase  {
     // was already on a call. Decided once at arrival and read on every re-post
     // so an async caller-name refresh can't re-derive it from a since-changed
     // call list and promote the quiet nudge back into a full-screen ring.
-    private boolean lightweightNotification = false;
+    //
+    // volatile: written on the main thread, read by VoiceService.syncRinger()
+    // from the Firebase and Twilio SDK threads. Nothing else establishes a
+    // happens-before edge -- callRecordList's Vector monitor covers the list,
+    // not the fields of the records in it.
+    private volatile boolean lightweightNotification = false;
+    // Close patch: this call's ring was deliberately silenced -- the user opened
+    // its answer screen, or answering it failed. The invite can still be ACTIVE
+    // (genuinely still ringing, still answerable), so this is what stops
+    // VoiceService.syncRinger() starting the sound up again on the next
+    // reconcile. volatile as above; here a missed write restarts the ring of a
+    // call that was just answered.
+    private volatile boolean ringSilenced = false;
     public CallRecord(final UUID uuid) {
       this.uuid = uuid;
     }
@@ -125,6 +137,12 @@ public class CallRecordDatabase  {
     }
     public void setLightweightNotification(final boolean lightweight) {
       this.lightweightNotification = lightweight;
+    }
+    public boolean isRingSilenced() {
+      return this.ringSilenced;
+    }
+    public void setRingSilenced(final boolean ringSilenced) {
+      this.ringSilenced = ringSilenced;
     }
     public void setNotificationId(int notificationId) {
       this.notificationId = notificationId;
@@ -211,6 +229,34 @@ public class CallRecordDatabase  {
     final List<CallRecord> active = activeCalls();
     active.removeIf(record -> record.equals(exclude));
     return active;
+  }
+  // Close patch: invites still ringing -- not answered, rejected or cancelled.
+  // These are the calls that still own an incoming-call notification.
+  public List<CallRecord> pendingInviteCalls() {
+    final List<CallRecord> pending = new ArrayList<>();
+    for (final CallRecord record : new ArrayList<>(callRecordList)) {
+      if (null == record.getVoiceCall()
+          && null != record.getCallInvite()
+          && ACTIVE == record.getCallInviteState()) {
+        pending.add(record);
+      }
+    }
+    return pending;
+  }
+  // Close patch: the pending invites whose ring should be audible, minus the
+  // deliberately silenced. Iteration is arrival order, so firstRingingCall() has
+  // been ringing longest. VoiceService.syncRinger() reconciles against this.
+  public List<CallRecord> ringingCalls() {
+    final List<CallRecord> ringing = pendingInviteCalls();
+    ringing.removeIf(CallRecord::isRingSilenced);
+    return ringing;
+  }
+  public boolean hasRingingCall() {
+    return !ringingCalls().isEmpty();
+  }
+  public CallRecord firstRingingCall() {
+    final List<CallRecord> ringing = ringingCalls();
+    return ringing.isEmpty() ? null : ringing.get(0);
   }
   private static boolean comparator(@NonNull final CallRecord lhs, @NonNull final CallRecord rhs) {
     if (null != lhs.uuid && null != rhs.uuid) {

@@ -152,6 +152,8 @@ public class NotificationUtility {
       .setName(notificationResource.getName())
       .build();
 
+    // constructMessage() keys these by action + uuid, so the Answer/Decline
+    // PendingIntents of two concurrent calls can never collide.
     Intent rejectIntent = constructMessage(
       context,
       Constants.ACTION_REJECT_CALL,
@@ -178,11 +180,13 @@ public class NotificationUtility {
     fullScreenIntent.setClassName(
       context.getPackageName(), context.getPackageName() + ".IncomingCallActivity");
     fullScreenIntent.putExtra(Constants.MSG_KEY_UUID, callRecord.getUuid());
-    // Close patch: unique data per call so concurrent incoming calls
-    // get distinct PendingIntents. Without this, intents differing only by
-    // extras are filterEqual and FLAG_UPDATE_CURRENT overwrites the earlier
-    // call's UUID -- the answer screen would then act on the wrong call.
-    fullScreenIntent.setData(Uri.parse("twilio-incoming-call://" + callRecord.getUuid()));
+    // Close patch: hand-built (the answer screen lives in the host app, so it is
+    // addressed by name, not by Class), so it repeats what constructMessage()
+    // does for every other call intent -- key it by action + uuid so concurrent
+    // calls get distinct PendingIntents. See constructMessage.
+    fullScreenIntent.setData(Uri.parse(
+      "twilio-call://" + Constants.ACTION_FOREGROUND_AND_DEPRIORITIZE_INCOMING_CALL_NOTIFICATION
+        + "/" + callRecord.getUuid()));
     PendingIntent piFullScreenIntent =
       constructPendingIntentForActivity(context, fullScreenIntent);
 
