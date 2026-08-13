@@ -14,7 +14,6 @@
     "ios",
     "cpp",
     "twilio-voice-react-native.podspec",
-    "!lib/typescript/test/app",
     "!android/build",
     "!ios/build",
     "!**/__tests__",
@@ -22,7 +21,6 @@
     "!**/__mocks__"
   ],
   "scripts": {
-    "app": "yarn run check && yarn --cwd test/app",
     "bootstrap": "yarn run build:constants && yarn --cwd test/app && yarn && yarn pods",
     "build:api:extractor": "api-extractor run --local",
     "build:api:documenter": "api-documenter markdown --input-folder ./temp --output-folder ./docs/api",
@@ -34,7 +32,6 @@
     "check:type": "tsc --noEmit",
     "check:api": "git diff --exit-code src/error/generated.ts api/",
     "check": "yarn run build:constants && yarn run build:errors && yarn run build:docs && yarn run check:api && yarn run check:type && yarn run check:lint && yarn run check:test --coverage",
-    "pods": "cd test/app && pod-install --quiet",
     "prepare": "yarn run build:constants && bob build",
     "release": "release",
     "test": "jest"
@@ -91,7 +88,6 @@
   "jest": {
     "preset": "react-native",
     "modulePathIgnorePatterns": [
-      "<rootDir>/test",
       "<rootDir>/lib",
       "<rootDir>/types"
     ]
@@ -129,7 +125,6 @@
   "eslintIgnore": [
     "node_modules/",
     "lib/",
-    "test/app/",
     "src/error/generated.ts",
     "coverage/"
   ],
