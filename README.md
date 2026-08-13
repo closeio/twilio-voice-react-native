@@ -1,63 +1,57 @@
-# Twilio Voice React Native SDK
-[![NPM](https://img.shields.io/npm/v/%40twilio/voice-react-native-sdk.svg?color=blue)](https://www.npmjs.com/package/%40twilio/voice-react-native-sdk) [![CircleCI](https://dl.circleci.com/status-badge/img/gh/twilio/twilio-voice-react-native/tree/main.svg?style=shield)](https://dl.circleci.com/status-badge/redirect/gh/twilio/twilio-voice-react-native/tree/main)
+# Twilio Voice React Native SDK (Close fork)
 
-Twilio's Voice React Native SDK allows you to add real-time voice and PSTN calling to your React Native apps.
+This is a Close fork of
+[twilio/twilio-voice-react-native](https://github.com/twilio/twilio-voice-react-native).
+The Close mobile app uses it as a git dependency. We do not publish it to npm.
 
-- [Documentation](https://www.twilio.com/docs/voice/sdks/react-native)
-- [API Reference](https://github.com/twilio/twilio-voice-react-native/blob/latest/docs/api/voice-react-native-sdk.md)
-- [Reference App](https://github.com/twilio/twilio-voice-react-native-app)
+## Differences from upstream
 
-Please check out the following if you are new to Twilio's Programmable Voice or React Native.
+These parts of upstream are removed:
 
-- [Programmable Voice](https://www.twilio.com/docs/voice/sdks)
-- [React Native](https://reactnative.dev/docs/getting-started)
+- the test app
+- the documentation and the API report tooling
+- the release tooling
+- CI and GitHub files
 
-## Installation
-The package is available through [npm](https://www.npmjs.com/package/@twilio/voice-react-native-sdk).
+## Repo layout
+
+- `src/` — TypeScript source
+- `android/`, `ios/` — native code
+- `lib/` — build output. It is committed.
+- `constants/`, `scripts/` — code generation
+
+## Native changes
+
+Edit the files in `android/` or `ios/`. Then build and test the change inside
+the Close mobile app.
+
+## TypeScript changes
+
+1. Edit the files in `src/`.
+2. Run `yarn prepare`.
+3. Commit the changed files in `lib/`.
+
+The app uses `lib/`. A change in `src/` has no effect until you rebuild `lib/`.
+
+## Generated files
+
+- After a change in `constants/constants.src`, run `yarn build:constants`.
+- After a change in `scripts/errors.js`, run `yarn build:errors`.
+
+Commit the generated files.
+
+## Checks
+
+Run all the checks:
 
 ```sh
-yarn add @twilio/voice-react-native-sdk
+yarn check:all
 ```
 
-Once the package has been installed to your React Native application, there are further steps that you will need to take for both iOS and Android platforms. Please see the supporting documentation below.
+Or run one check:
 
-## Supporting Documentation
-
-### Getting Started
-
-#### iOS
-Learn how to get started for the [iOS platform](/docs/getting-started-ios.md).
-
-#### Android
-Learn how to get started for the Android platform if you are using [Java](/docs/getting-started-android-java.md) or [Kotlin](/docs/getting-started-android-kotlin.md).
-
-### Migration Guide
-If you are migrating from a version of the Twilio Voice React Native SDK `< 1.0.0.beta.4` to a version `>= 1.0.0.beta.4`, please see [this](/docs/migration-guide-beta.4.md) document.
-
-### Customizing Notifications
-To customize the appearance and content of your application's notifications, please see [this](/docs/customize-notifications.md) document.
-
-### Outgoing Call Ringback Tone
-To enable your application to play a ringback tone while making an outgoing call, please see [this](/docs/play-outgoing-call-ringback-tone.md) document.
-
-### Out-of-band PushKit Handling
-To have your application implement or use its own `PushKit` delegate module, please see [this](/docs/applications-own-pushkit-handler.md) document.
-
-### Out-of-band Firebase Messaging Service
-To have your application implement or use a different `FirebaseMessagingService` (such as OneSignal or RNFirebase), please see [this](/docs/out-of-band-firebase-messaging-service.md) document.
-
-## Issues and Support
-Please check out our [common issues](/COMMON_ISSUES.md) page or file any issues you find here on Github. For general inquiries related to the Voice SDK you can file a support ticket.
-
-Please ensure that you are not sharing any [Personally Identifiable Information(PII)](https://www.twilio.com/docs/glossary/what-is-personally-identifiable-information-pii) or sensitive account information (API keys, credentials, etc.) when reporting an issue.
-
-Please check out our [known issues](/KNOWN_ISSUES.md) for known bugs and workarounds.
-
-## Related
-- [Reference App](https://github.com/twilio/twilio-voice-react-native-app)
-- [Twilio Voice JS](https://github.com/twilio/twilio-voice.js)
-- [Twilio Voice iOS](https://github.com/twilio/voice-quickstart-ios)
-- [Twilio Voice Android](https://github.com/twilio/voice-quickstart-android)
-
-## License
-See [LICENSE](/LICENSE)
+```sh
+yarn check:type
+yarn check:lint
+yarn test
+```
