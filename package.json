@@ -23,10 +23,10 @@
   "scripts": {
     "build:constants": "node ./scripts/generate-constants.js",
     "build:errors": "node ./scripts/generate-errors.js",
+    "check:all": "yarn run build:constants && yarn run build:errors && yarn run check:type && yarn run check:lint && yarn run check:test",
     "check:lint": "eslint \"**/*.{js,ts,tsx}\"",
     "check:test": "jest",
     "check:type": "tsc --noEmit",
-    "check": "yarn run build:constants && yarn run build:errors && yarn run check:type && yarn run check:lint && yarn run check:test",
     "prepare": "yarn run build:constants && bob build",
     "test": "jest"
   },

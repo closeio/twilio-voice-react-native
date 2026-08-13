@@ -42,6 +42,14 @@ Commit the generated files.
 
 ## Checks
 
+Run all the checks:
+
+```sh
+yarn check:all
+```
+
+Or run one check:
+
 ```sh
 yarn check:type
 yarn check:lint
