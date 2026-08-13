@@ -21,7 +21,6 @@
     "!**/__mocks__"
   ],
   "scripts": {
-    "bootstrap": "yarn run build:constants && yarn --cwd test/app && yarn && yarn pods",
     "build:api:extractor": "api-extractor run --local",
     "build:api:documenter": "api-documenter markdown --input-folder ./temp --output-folder ./docs/api",
     "build:constants": "node ./scripts/generate-constants.js",
