@@ -64,6 +64,9 @@
     "react": "*",
     "react-native": "*"
   },
+  "resolutions": {
+    "lodash": "4.18.1"
+  },
   "jest": {
     "preset": "react-native",
     "modulePathIgnorePatterns": [
