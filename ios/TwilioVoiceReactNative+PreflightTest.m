@@ -305,7 +305,7 @@ RCT_EXPORT_METHOD(preflightTest_flushEvents:(RCTPromiseResolveBlock)resolve
     resolve(nil);
 }
 
-- (void)preflight:(nonnull TVOPreflightTest *)preflightTest didCompleteWitReport:(nonnull TVOPreflightReport *)report {
+- (void)preflight:(nonnull TVOPreflightTest *)preflightTest didCompleteWithReport:(nonnull TVOPreflightReport *)report {
     [self sendPreflightEvent:@{
         kTwilioVoiceReactNativePreflightTestEventKeyUuid: self.preflightTestUuid,
         kTwilioVoiceReactNativePreflightTestEventKeyType: kTwilioVoiceReactNativePreflightTestEventTypeValueCompleted,
