@@ -761,8 +761,9 @@ function parseReport(rawReport: string): PreflightTest.Report {
 
   const callSid: string = unprocessedReport.callSid;
 
-  // Note: Android returns enum values where the first letter is capitalized.
-  // The helper function normalizes this into all-lowercased values.
+  // Note: Native methods return enum values where the first letter is
+  // capitalized. The helper function normalizes this into all-lowercased
+  // values.
   const callQuality: PreflightTest.CallQuality | null = parseCallQuality(
     unprocessedReport.callQuality
   );
@@ -773,7 +774,6 @@ function parseReport(rawReport: string): PreflightTest.Report {
   const iceCandidateStats: PreflightTest.RTCIceCandidateStats[] =
     unprocessedReport.iceCandidates;
 
-  // Note: iOS returns a string, Android returns a boolean
   const isTurnRequired: boolean | null = parseIsTurnRequired(
     unprocessedReport.isTurnRequired
   );
@@ -814,14 +814,10 @@ function parseReport(rawReport: string): PreflightTest.Report {
   const selectedIceCandidatePairStats: PreflightTest.RTCSelectedIceCandidatePairStats =
     unprocessedReport.selectedIceCandidatePair;
 
-  // Note: iOS returns undefined where Android returns an empty array
-  // when there were no warnings
   const warnings: PreflightTest.Warning[] = parseWarnings(
     unprocessedReport.warnings
   );
 
-  // Note: iOS returns undefined where Android returns an empty array
-  // when there were no warningsCleared
   const warningsCleared: PreflightTest.WarningCleared[] = parseWarningsCleared(
     unprocessedReport.warningsCleared
   );
