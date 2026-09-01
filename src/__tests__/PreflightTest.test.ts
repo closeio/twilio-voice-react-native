@@ -271,8 +271,8 @@ describe('PreflightTest', () => {
           preflight['_handleCompletedEvent']({
             [Constants.PreflightTestCompletedEventKeyReport]: JSON.stringify({
               ...baseMockReport,
-              callQuality: 0,
-              isTurnRequired: 'false',
+              callQuality: 'Excellent',
+              isTurnRequired: false,
             }),
           } as any);
 
@@ -618,51 +618,6 @@ describe('PreflightTest', () => {
     });
 
     describe('getReport', () => {
-      describe('invalid platform', () => {
-        it('throws an error in "parseCallQuality"', async () => {
-          jest
-            .spyOn(Common.Platform, 'OS', 'get')
-            .mockReturnValue('foobar' as any);
-
-          jest
-            .spyOn(Common.NativeModule, 'preflightTest_getReport')
-            .mockImplementation(async () =>
-              JSON.stringify({
-                ...baseMockReport,
-                callQuality: 'foobar',
-              })
-            );
-
-          await expect(async () => {
-            await preflight.getReport();
-          }).rejects.toBeInstanceOf(InvalidStateError);
-        });
-
-        it('throws an error in "parseIsTurnRequired"', async () => {
-          const mockReturnValues = (function* () {
-            yield 'android';
-            yield 'foobar';
-          })();
-
-          jest
-            .spyOn(Common.Platform, 'OS', 'get')
-            .mockImplementation(() => mockReturnValues.next().value as any);
-
-          jest
-            .spyOn(Common.NativeModule, 'preflightTest_getReport')
-            .mockImplementation(async () =>
-              JSON.stringify({
-                ...baseMockReport,
-                callQuality: 'Excellent',
-              })
-            );
-
-          await expect(async () => {
-            await preflight.getReport();
-          }).rejects.toBeInstanceOf(InvalidStateError);
-        });
-      });
-
       describe('android', () => {
         beforeEach(() => {
           jest.spyOn(Common.Platform, 'OS', 'get').mockReturnValue('android');
@@ -935,8 +890,8 @@ describe('PreflightTest', () => {
             .mockResolvedValue(
               JSON.stringify({
                 ...baseMockReport,
-                callQuality: 0,
-                isTurnRequired: 'false',
+                callQuality: 'Excellent',
+                isTurnRequired: false,
               })
             );
 
@@ -951,8 +906,8 @@ describe('PreflightTest', () => {
             .mockResolvedValue(
               JSON.stringify({
                 ...baseMockReport,
-                callQuality: 0,
-                isTurnRequired: 'false',
+                callQuality: 'Excellent',
+                isTurnRequired: false,
               })
             );
 
@@ -968,7 +923,7 @@ describe('PreflightTest', () => {
               JSON.stringify({
                 ...baseMockReport,
                 callQuality: null,
-                isTurnRequired: 'false',
+                isTurnRequired: false,
               })
             );
 
@@ -984,7 +939,7 @@ describe('PreflightTest', () => {
               JSON.stringify({
                 ...baseMockReport,
                 callQuality: undefined,
-                isTurnRequired: 'false',
+                isTurnRequired: false,
               })
             );
 
@@ -993,7 +948,7 @@ describe('PreflightTest', () => {
           expect(report).toEqual({ ...expectedReport, callQuality: null });
         });
 
-        it('throws if the native call quality is an invalid number', async () => {
+        it('throws if the native call quality is not a string', async () => {
           jest
             .spyOn(Common.NativeModule, 'preflightTest_getReport')
             .mockResolvedValue(
@@ -1005,7 +960,7 @@ describe('PreflightTest', () => {
           }).rejects.toBeInstanceOf(InvalidStateError);
         });
 
-        it('throws if the native call quality is not a number', async () => {
+        it('throws if the native call quality is an invalid string', async () => {
           jest
             .spyOn(Common.NativeModule, 'preflightTest_getReport')
             .mockResolvedValue(
@@ -1017,13 +972,13 @@ describe('PreflightTest', () => {
           }).rejects.toBeInstanceOf(InvalidStateError);
         });
 
-        it('throws if the native "isTurnRequired" is not a string', async () => {
+        it('throws if the native "isTurnRequired" is a number', async () => {
           jest
             .spyOn(Common.NativeModule, 'preflightTest_getReport')
             .mockResolvedValue(
               JSON.stringify({
                 ...baseMockReport,
-                callQuality: 0,
+                callQuality: 'Excellent',
                 isTurnRequired: 10,
               })
             );
@@ -1033,13 +988,13 @@ describe('PreflightTest', () => {
           }).rejects.toBeInstanceOf(InvalidStateError);
         });
 
-        it('throws if the native "isTurnRequired" is not valid', async () => {
+        it('throws if the native "isTurnRequired" is a string', async () => {
           jest
             .spyOn(Common.NativeModule, 'preflightTest_getReport')
             .mockResolvedValue(
               JSON.stringify({
                 ...baseMockReport,
-                callQuality: 0,
+                callQuality: 'Excellent',
                 isTurnRequired: 'foobar',
               })
             );
@@ -1055,7 +1010,7 @@ describe('PreflightTest', () => {
             .mockResolvedValue(
               JSON.stringify({
                 ...baseMockReport,
-                callQuality: 0,
+                callQuality: 'Excellent',
                 isTurnRequired: undefined,
               })
             );
@@ -1074,7 +1029,7 @@ describe('PreflightTest', () => {
             .mockResolvedValue(
               JSON.stringify({
                 ...baseMockReport,
-                callQuality: 0,
+                callQuality: 'Excellent',
                 isTurnRequired: null,
               })
             );
@@ -1093,8 +1048,8 @@ describe('PreflightTest', () => {
             .mockResolvedValue(
               JSON.stringify({
                 ...baseMockReport,
-                callQuality: 0,
-                isTurnRequired: 'false',
+                callQuality: 'Excellent',
+                isTurnRequired: false,
                 warnings: undefined,
               })
             );
@@ -1113,8 +1068,8 @@ describe('PreflightTest', () => {
             .mockResolvedValue(
               JSON.stringify({
                 ...baseMockReport,
-                callQuality: 0,
-                isTurnRequired: 'false',
+                callQuality: 'Excellent',
+                isTurnRequired: false,
                 warnings: null,
               })
             );
@@ -1133,8 +1088,8 @@ describe('PreflightTest', () => {
             .mockResolvedValue(
               JSON.stringify({
                 ...baseMockReport,
-                callQuality: 0,
-                isTurnRequired: 'false',
+                callQuality: 'Excellent',
+                isTurnRequired: false,
                 warningsCleared: undefined,
               })
             );
@@ -1153,8 +1108,8 @@ describe('PreflightTest', () => {
             .mockResolvedValue(
               JSON.stringify({
                 ...baseMockReport,
-                callQuality: 0,
-                isTurnRequired: 'false',
+                callQuality: 'Excellent',
+                isTurnRequired: false,
                 warningsCleared: null,
               })
             );
@@ -1173,8 +1128,8 @@ describe('PreflightTest', () => {
             .mockResolvedValue(
               JSON.stringify({
                 ...baseMockReport,
-                callQuality: 0,
-                isTurnRequired: 'false',
+                callQuality: 'Excellent',
+                isTurnRequired: false,
                 warnings: 'foobar',
                 warningsCleared: undefined,
               })
@@ -1191,8 +1146,8 @@ describe('PreflightTest', () => {
             .mockResolvedValue(
               JSON.stringify({
                 ...baseMockReport,
-                callQuality: 0,
-                isTurnRequired: 'false',
+                callQuality: 'Excellent',
+                isTurnRequired: false,
                 warnings: undefined,
                 warningsCleared: 'foobar',
               })

@@ -606,28 +606,13 @@ function parseTimeMeasurement(nativeTimeMeasurement: {
 
 /**
  * Parse native call quality enum.
+ *
+ * Both platforms report the quality as a string literal. iOS did report a
+ * numeric enum until Twilio Voice iOS 6.13.4 changed `dictionaryReport` to
+ * emit string literals, matching Android.
  */
 function parseCallQuality(
   nativeCallQuality: any
-): PreflightTest.CallQuality | null {
-  switch (common.Platform.OS) {
-    case 'android': {
-      return parseCallQualityAndroid(nativeCallQuality);
-    }
-    case 'ios': {
-      return parseCallQualityIos(nativeCallQuality);
-    }
-    default: {
-      throw new InvalidStateError('Invalid platform.');
-    }
-  }
-}
-
-/**
- * Parse call quality value for Android platform.
- */
-function parseCallQualityAndroid(
-  nativeCallQuality: string | undefined | null
 ): PreflightTest.CallQuality | null {
   if (typeof nativeCallQuality === 'undefined' || nativeCallQuality === null) {
     return null;
@@ -639,38 +624,11 @@ function parseCallQualityAndroid(
     );
   }
 
-  const parsedCallQuality = callQualityMap.android.get(nativeCallQuality);
+  const parsedCallQuality = callQualityMap.get(nativeCallQuality);
 
   if (typeof parsedCallQuality !== 'string') {
     throw new InvalidStateError(
       `Call quality invalid. Expected a string, found "${nativeCallQuality}".`
-    );
-  }
-
-  return parsedCallQuality;
-}
-
-/**
- * Parse call quality for iOS platform.
- */
-function parseCallQualityIos(
-  nativeCallQuality: number | undefined | null
-): PreflightTest.CallQuality | null {
-  if (typeof nativeCallQuality === 'undefined' || nativeCallQuality === null) {
-    return null;
-  }
-
-  if (typeof nativeCallQuality !== 'number') {
-    throw new InvalidStateError(
-      `Call quality not of type "number". Found "${typeof nativeCallQuality}".`
-    );
-  }
-
-  const parsedCallQuality = callQualityMap.ios.get(nativeCallQuality);
-
-  if (typeof parsedCallQuality !== 'string') {
-    throw new InvalidStateError(
-      `Call quality invalid. Expected [0, 4], found "${nativeCallQuality}".`
     );
   }
 
@@ -738,27 +696,12 @@ function parseSample(
 
 /**
  * Parse native "isTurnRequired" value.
+ *
+ * Both platforms report a real boolean. iOS did report the string "true" /
+ * "false" until Twilio Voice iOS 6.13.4 changed `dictionaryReport` to emit
+ * true booleans, matching Android.
  */
 function parseIsTurnRequired(isTurnRequired: any): boolean | null {
-  switch (common.Platform.OS) {
-    case 'android': {
-      return parseIsTurnRequiredAndroid(isTurnRequired);
-    }
-    case 'ios': {
-      return parseIsTurnRequiredIos(isTurnRequired);
-    }
-    default: {
-      throw new InvalidStateError('Invalid platform.');
-    }
-  }
-}
-
-/**
- * Parse native "isTurnRequired" value on Android.
- */
-function parseIsTurnRequiredAndroid(
-  isTurnRequired: boolean | undefined | null
-): boolean | null {
   if (typeof isTurnRequired === 'undefined' || isTurnRequired === null) {
     return null;
   }
@@ -770,34 +713,6 @@ function parseIsTurnRequiredAndroid(
   }
 
   return isTurnRequired;
-}
-
-/**
- * Parse native "isTurnRequired" value on iOS.
- */
-function parseIsTurnRequiredIos(
-  isTurnRequired: string | undefined | null
-): boolean | null {
-  if (typeof isTurnRequired === 'undefined' || isTurnRequired === null) {
-    return null;
-  }
-
-  if (typeof isTurnRequired !== 'string') {
-    throw new InvalidStateError(
-      'PreflightTest "isTurnRequired" not of type "string". ' +
-        `Found "${isTurnRequired}".`
-    );
-  }
-
-  const parsedValue = isTurnRequiredMap.ios.get(isTurnRequired);
-
-  if (typeof parsedValue !== 'boolean') {
-    throw new InvalidStateError(
-      `PreflightTest "isTurnRequired" not valid. Found "${isTurnRequired}".`
-    );
-  }
-
-  return parsedValue;
 }
 
 /**
@@ -846,8 +761,9 @@ function parseReport(rawReport: string): PreflightTest.Report {
 
   const callSid: string = unprocessedReport.callSid;
 
-  // Note: Android returns enum values where the first letter is capitalized.
-  // The helper function normalizes this into all-lowercased values.
+  // Note: Native methods return enum values where the first letter is
+  // capitalized. The helper function normalizes this into all-lowercased
+  // values.
   const callQuality: PreflightTest.CallQuality | null = parseCallQuality(
     unprocessedReport.callQuality
   );
@@ -858,7 +774,6 @@ function parseReport(rawReport: string): PreflightTest.Report {
   const iceCandidateStats: PreflightTest.RTCIceCandidateStats[] =
     unprocessedReport.iceCandidates;
 
-  // Note: iOS returns a string, Android returns a boolean
   const isTurnRequired: boolean | null = parseIsTurnRequired(
     unprocessedReport.isTurnRequired
   );
@@ -899,14 +814,10 @@ function parseReport(rawReport: string): PreflightTest.Report {
   const selectedIceCandidatePairStats: PreflightTest.RTCSelectedIceCandidatePairStats =
     unprocessedReport.selectedIceCandidatePair;
 
-  // Note: iOS returns undefined where Android returns an empty array
-  // when there were no warnings
   const warnings: PreflightTest.Warning[] = parseWarnings(
     unprocessedReport.warnings
   );
 
-  // Note: iOS returns undefined where Android returns an empty array
-  // when there were no warningsCleared
   const warningsCleared: PreflightTest.WarningCleared[] = parseWarningsCleared(
     unprocessedReport.warningsCleared
   );
@@ -1455,32 +1366,13 @@ export namespace PreflightTest {
 /**
  * Map of call quality values from the native layer to the expected JS values.
  */
-const callQualityMap = {
-  ios: new Map<number, PreflightTest.CallQuality>([
-    [0, PreflightTest.CallQuality.Excellent],
-    [1, PreflightTest.CallQuality.Great],
-    [2, PreflightTest.CallQuality.Good],
-    [3, PreflightTest.CallQuality.Fair],
-    [4, PreflightTest.CallQuality.Degraded],
-  ]),
-  android: new Map<string, PreflightTest.CallQuality>([
-    ['Excellent', PreflightTest.CallQuality.Excellent],
-    ['Great', PreflightTest.CallQuality.Great],
-    ['Good', PreflightTest.CallQuality.Good],
-    ['Fair', PreflightTest.CallQuality.Fair],
-    ['Degraded', PreflightTest.CallQuality.Degraded],
-  ]),
-};
-
-/**
- * Map of isTurnRequired values from the native layer to the expected JS values.
- */
-const isTurnRequiredMap = {
-  ios: new Map<string, boolean>([
-    ['true', true],
-    ['false', false],
-  ]),
-};
+const callQualityMap = new Map<string, PreflightTest.CallQuality>([
+  ['Excellent', PreflightTest.CallQuality.Excellent],
+  ['Great', PreflightTest.CallQuality.Great],
+  ['Good', PreflightTest.CallQuality.Good],
+  ['Fair', PreflightTest.CallQuality.Fair],
+  ['Degraded', PreflightTest.CallQuality.Degraded],
+]);
 
 /**
  * Map of state values from the native layers/common constants to the expected
