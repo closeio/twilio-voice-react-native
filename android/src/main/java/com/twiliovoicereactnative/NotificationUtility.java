@@ -124,6 +124,12 @@ public class NotificationUtility {
       for (Map.Entry<String, String> e : twimlParams.entrySet()) {
         String paramKey = e.getKey();
         String paramValue = e.getValue();
+        // Close patch: a push can carry a custom parameter with no value. Leave
+        // the placeholder unresolved so getName() falls back to ${from}, rather
+        // than throwing out of the incoming-call path.
+        if (paramValue == null) {
+          continue;
+        }
         processedTemplate = processedTemplate.replaceAll(
           String.format("\\$\\{%s\\}", paramKey),
           // Close patch: quote the replacement so a `$` or `\` in a
